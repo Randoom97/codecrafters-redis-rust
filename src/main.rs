@@ -1,9 +1,10 @@
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
+    thread,
 };
 
-fn stream_handler(stream: &mut TcpStream) {
+fn stream_handler(mut stream: TcpStream) {
     loop {
         let mut input_buffer = [0; 1024];
         let read_result = stream.read(&mut input_buffer);
@@ -23,8 +24,8 @@ fn main() {
 
     for stream_result in listener.incoming() {
         match stream_result {
-            Ok(mut stream) => {
-                stream_handler(&mut stream);
+            Ok(stream) => {
+                thread::spawn(|| stream_handler(stream));
             }
             Err(e) => {
                 println!("error: {}", e);
