@@ -12,7 +12,7 @@ pub enum RedisType {
     SimpleString(String),
     SimpleError(String),
     Integer(i64),
-    BulkString(String),
+    BulkString(Option<String>),
     Array(Vec<RedisType>),
     Null,
     Boolean(bool),
@@ -75,11 +75,14 @@ fn scan_int(reader: &mut impl Read) -> Option<i64> {
     return Some(integer);
 }
 
-fn bulk_string(reader: &mut impl Read) -> Option<String> {
+fn bulk_string(reader: &mut impl Read) -> Option<Option<String>> {
     option_get_or_return_none!(length, scan_int(reader));
+    if length < 0 {
+        return Some(None);
+    }
     option_get_or_return_none!(bytes, read_n_bytes(reader, length as usize + 2)); // +2 to get the extra crlf
     result_get_or_return_none!(string, from_utf8(&bytes[..length as usize]));
-    return Some(string.to_string());
+    return Some(Some(string.to_string()));
 }
 
 pub fn decode(reader: &mut impl Read) -> Option<RedisType> {
@@ -144,12 +147,14 @@ pub fn decode(reader: &mut impl Read) -> Option<RedisType> {
         }
         // bulk errors
         b'!' => {
-            option_get_or_return_none!(error, bulk_string(reader));
+            option_get_or_return_none!(error_option, bulk_string(reader));
+            option_get_or_return_none!(error, error_option);
             return Some(RedisType::BulkError(error));
         }
         // verbatim strings
         b'=' => {
-            option_get_or_return_none!(string, bulk_string(reader));
+            option_get_or_return_none!(string_option, bulk_string(reader));
+            option_get_or_return_none!(string, string_option);
             return Some(RedisType::VerbatimString(string));
         }
         // TODO fix hashing and equals issues on RedisType
@@ -191,10 +196,78 @@ pub fn decode(reader: &mut impl Read) -> Option<RedisType> {
     }
 }
 
+pub fn encode(data: &RedisType) -> String {
+    return match data {
+        RedisType::SimpleString(string) => encode_simple_string(string),
+        RedisType::SimpleError(error) => encode_simple_error(error),
+        RedisType::Integer(integer) => encode_integer(*integer),
+        RedisType::BulkString(string) => encode_bulk_string(string.as_ref().map(|x| x.as_str())),
+        RedisType::Array(array) => encode_array(array),
+        RedisType::Null => encode_null(),
+        RedisType::Boolean(boolean) => encode_boolean(*boolean),
+        RedisType::Double(double) => encode_double(*double),
+        RedisType::BigNumber(big_number) => encode_big_number(big_number),
+        RedisType::BulkError(bulk_error) => encode_bulk_error(bulk_error),
+        RedisType::VerbatimString(string) => encode_verbatim_string(string),
+        RedisType::Push(push) => encode_push(push),
+    };
+}
+
 pub fn encode_simple_string(string: &str) -> String {
     return "+".to_owned() + string + "\r\n";
 }
 
 pub fn encode_simple_error(error: &str) -> String {
     return "-".to_owned() + error + "\r\n";
+}
+
+pub fn encode_integer(integer: i64) -> String {
+    return ":".to_owned() + &integer.to_string() + "\r\n";
+}
+
+pub fn encode_bulk_string(string: Option<&str>) -> String {
+    if string.is_none() {
+        return "$-1\r\n".to_owned(); // null bulk string
+    }
+    return "$".to_owned() + &string.unwrap().len().to_string() + "\r\n" + string.unwrap() + "\r\n";
+}
+
+pub fn encode_array(array: &Vec<RedisType>) -> String {
+    let mut result = "*".to_owned() + &array.len().to_string() + "\r\n";
+    for item in array {
+        result += &encode(&item);
+    }
+    return result;
+}
+
+pub fn encode_null() -> String {
+    return "_\r\n".to_string();
+}
+
+pub fn encode_boolean(boolean: bool) -> String {
+    return "#".to_owned() + (if boolean { "t" } else { "f" }) + "\r\n";
+}
+
+pub fn encode_double(double: f64) -> String {
+    return ",".to_owned() + &double.to_string() + "\r\n";
+}
+
+pub fn encode_big_number(big_number: &BigInt) -> String {
+    return "(".to_owned() + &big_number.to_string() + "\r\n";
+}
+
+pub fn encode_bulk_error(bulk_error: &str) -> String {
+    return "!".to_owned() + &bulk_error.len().to_string() + "\r\n" + bulk_error + "\r\n";
+}
+
+pub fn encode_verbatim_string(string: &str) -> String {
+    return "=".to_owned() + &string.len().to_string() + "\r\n" + string + "\r\n";
+}
+
+pub fn encode_push(push: &Vec<RedisType>) -> String {
+    let mut result = "*".to_owned() + &push.len().to_string() + "\r\n";
+    for item in push {
+        result += &encode(&item);
+    }
+    return result;
 }
