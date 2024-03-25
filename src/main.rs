@@ -4,6 +4,7 @@ mod parser;
 
 use std::{
     collections::HashMap,
+    env,
     io::Write,
     net::{TcpListener, TcpStream},
     sync::RwLock,
@@ -34,6 +35,14 @@ fn get_argument<'a>(token: &str, arguments: &'a Vec<String>) -> Option<&'a Strin
     return arguments.get(position.unwrap() + 1);
 }
 
+fn get_u64_argument(token: &str, arguments: &Vec<String>) -> Option<u64> {
+    let string_option = get_argument(token, arguments);
+    if string_option.is_none() {
+        return None;
+    }
+    return str::parse::<u64>(string_option.unwrap()).ok();
+}
+
 fn stream_handler(mut stream: TcpStream) {
     loop {
         let input_option = decode(&mut stream);
@@ -57,11 +66,13 @@ fn stream_handler(mut stream: TcpStream) {
                 let value = &arguments[2];
 
                 let mut expire_time: Option<SystemTime> = None;
-                let lifetime_arg = get_argument("px", &arguments);
+                let lifetime_arg = get_u64_argument("px", &arguments);
                 if lifetime_arg.is_some() {
-                    let duration =
-                        Duration::from_millis(str::parse::<u64>(lifetime_arg.unwrap()).unwrap());
-                    expire_time = Some(SystemTime::now().checked_add(duration).unwrap());
+                    expire_time = Some(
+                        SystemTime::now()
+                            .checked_add(Duration::from_millis(lifetime_arg.unwrap()))
+                            .unwrap(),
+                    );
                 }
                 unsafe {
                     let mut map = DATA_STORE.as_ref().unwrap().write().unwrap();
@@ -136,10 +147,14 @@ fn stream_handler(mut stream: TcpStream) {
 }
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+    let port = get_u64_argument("--port", &args);
+
     unsafe {
         DATA_STORE = Some(RwLock::new(HashMap::new()));
     }
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+    let listener =
+        TcpListener::bind("127.0.0.1:".to_owned() + &port.unwrap_or(6379).to_string()).unwrap();
 
     for stream_result in listener.incoming() {
         match stream_result {
