@@ -8,16 +8,30 @@ use std::{
     net::{TcpListener, TcpStream},
     sync::RwLock,
     thread,
+    time::{Duration, SystemTime},
 };
 
-use parser::{
-    decode, encode, encode_bulk_string, encode_simple_error, encode_simple_string, RedisType,
-};
+use parser::{decode, encode_bulk_string, encode_simple_error, encode_simple_string, RedisType};
+#[derive(Debug)]
+struct Data {
+    value: String,
+    expire_time: Option<SystemTime>,
+}
 
-static mut DATA_STORE: Option<RwLock<HashMap<String, RedisType>>> = None;
+static mut DATA_STORE: Option<RwLock<HashMap<String, Data>>> = None;
 
 fn send(stream: &mut impl Write, message: String) {
     stream.write(message.as_bytes()).unwrap();
+}
+
+fn get_argument<'a>(token: &str, arguments: &'a Vec<String>) -> Option<&'a String> {
+    let position = arguments
+        .iter()
+        .position(|s| s.to_ascii_lowercase() == token);
+    if position.is_none() {
+        return None;
+    }
+    return arguments.get(position.unwrap() + 1);
 }
 
 fn stream_handler(mut stream: TcpStream) {
@@ -27,33 +41,57 @@ fn stream_handler(mut stream: TcpStream) {
             continue;
         }
         option_type_guard!(arguments_option, input_option.unwrap(), RedisType::Array);
-        let mut arguments = arguments_option.unwrap();
-        option_type_guard!(command_option, &arguments[0], RedisType::BulkString);
-        match command_option
+        // clients should only be sending arrays of bulk strings
+        let arguments: Vec<String> = arguments_option
             .unwrap()
-            .as_ref()
-            .unwrap()
-            .to_ascii_lowercase()
-            .as_str()
-        {
+            .iter()
+            .map(|v| {
+                option_type_guard!(string, v, RedisType::BulkString);
+                return string.unwrap().as_ref().unwrap().to_owned();
+            })
+            .collect();
+
+        match arguments[0].to_ascii_lowercase().as_str() {
             "set" => {
-                option_type_guard!(key_option, &arguments[1], RedisType::BulkString);
-                let key = key_option.unwrap().to_owned().unwrap();
+                let key = &arguments[1];
+                let value = &arguments[2];
+
+                let mut expire_time: Option<SystemTime> = None;
+                let lifetime_arg = get_argument("px", &arguments);
+                if lifetime_arg.is_some() {
+                    let duration =
+                        Duration::from_millis(str::parse::<u64>(lifetime_arg.unwrap()).unwrap());
+                    expire_time = Some(SystemTime::now().checked_add(duration).unwrap());
+                }
                 unsafe {
                     let mut map = DATA_STORE.as_ref().unwrap().write().unwrap();
-                    map.insert(key, arguments.swap_remove(2));
+                    map.insert(
+                        key.to_owned(),
+                        Data {
+                            value: value.to_owned(),
+                            expire_time,
+                        },
+                    );
                 }
                 send(&mut stream, encode_simple_string("OK"));
             }
             "get" => {
-                option_type_guard!(key_option, &arguments[1], RedisType::BulkString);
-                let key = key_option.unwrap().as_ref().unwrap();
+                let key = &arguments[1];
                 let mut response: Option<String> = None;
+                let mut expired = false;
                 unsafe {
                     let map = DATA_STORE.as_ref().unwrap().read().unwrap();
-                    let value = map.get(key);
-                    if value.is_some() {
-                        response = Some(encode(value.unwrap()));
+                    let data_option = map.get(key);
+                    if data_option.is_some() {
+                        let data = data_option.unwrap();
+                        if data.expire_time.is_some()
+                            && SystemTime::now().gt(data.expire_time.as_ref().unwrap())
+                        {
+                            expired = true;
+                            response = None;
+                        } else {
+                            response = Some(encode_bulk_string(Some(&data.value)));
+                        }
                     }
                 }
                 if response.is_none() {
@@ -61,9 +99,28 @@ fn stream_handler(mut stream: TcpStream) {
                 } else {
                     send(&mut stream, response.unwrap());
                 }
+
+                // cleanup if we found the value expired
+                if expired {
+                    unsafe {
+                        // make sure it didn't get updated in the short time the lock was released before removing
+                        let mut map = DATA_STORE.as_ref().unwrap().write().unwrap();
+                        let data_option = map.get(key);
+                        if data_option.is_some()
+                            && data_option.unwrap().expire_time.is_some()
+                            && SystemTime::now().gt(data_option
+                                .unwrap()
+                                .expire_time
+                                .as_ref()
+                                .unwrap())
+                        {
+                            map.remove(key);
+                        }
+                    }
+                }
             }
             "echo" => {
-                send(&mut stream, encode(&arguments[1]));
+                send(&mut stream, encode_bulk_string(Some(&arguments[1])));
             }
             "ping" => {
                 send(&mut stream, encode_simple_string("PONG"));
