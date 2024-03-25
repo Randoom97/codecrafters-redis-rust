@@ -1,20 +1,42 @@
+#[macro_use]
+mod macros;
+mod parser;
+
 use std::{
-    io::{Read, Write},
+    io::Write,
     net::{TcpListener, TcpStream},
     thread,
 };
 
+use parser::{decode, encode_simple_error, encode_simple_string, RedisType};
+
+fn send(stream: &mut impl Write, message: String) {
+    stream.write(message.as_bytes()).unwrap();
+}
+
 fn stream_handler(mut stream: TcpStream) {
     loop {
-        let mut input_buffer = [0; 1024];
-        let read_result = stream.read(&mut input_buffer);
-        if read_result.is_err() {
-            break;
+        let input_option = decode(&mut stream);
+        if input_option.is_none() {
+            continue;
         }
-
-        let write_result = stream.write(b"+PONG\r\n");
-        if write_result.is_err() {
-            break;
+        option_type_guard!(arguments_option, input_option.unwrap(), RedisType::Array);
+        let arguments = arguments_option.unwrap();
+        option_type_guard!(command_option, &arguments[0], RedisType::BulkString);
+        match command_option.unwrap().to_ascii_lowercase().as_str() {
+            "echo" => {
+                option_type_guard!(arg1_option, &arguments[1], RedisType::BulkString);
+                send(&mut stream, encode_simple_string(arg1_option.unwrap()));
+            }
+            "ping" => {
+                send(&mut stream, encode_simple_string("PONG"));
+            }
+            _ => {
+                send(
+                    &mut stream,
+                    encode_simple_error("Error, unsupported command"),
+                );
+            }
         }
     }
 }
