@@ -50,7 +50,7 @@ fn stream_handler(
     loop {
         let input_option = decode(&mut stream);
         if input_option.is_none() {
-            continue;
+            break; // socket closed or bad parse
         }
         option_type_guard!(arguments_option, input_option.unwrap(), RedisType::Array);
         // clients should only be sending arrays of bulk strings
