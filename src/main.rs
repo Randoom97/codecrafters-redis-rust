@@ -12,7 +12,9 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use parser::{decode, encode_bulk_string, encode_simple_error, encode_simple_string, RedisType};
+use parser::{
+    decode, encode, encode_bulk_string, encode_simple_error, encode_simple_string, RedisType,
+};
 
 #[derive(Debug)]
 struct Data {
@@ -182,11 +184,40 @@ fn stream_handler(
 fn main() {
     let args: Vec<String> = env::args().collect();
     let port = get_u64_argument("--port", &args);
-    let replica_args = get_n_arguments("--replicaof", &args, 2);
+    let replica_args_option = get_n_arguments("--replicaof", &args, 2);
+
+    if replica_args_option.is_some() {
+        let replica_args = replica_args_option.as_ref().unwrap();
+        let master_host = replica_args[0];
+        let master_port = replica_args[1];
+        let host_stream_result = TcpStream::connect(master_host.to_owned() + ":" + master_port);
+        if host_stream_result.is_err() {
+            println!("couldn't connect to master");
+            return;
+        }
+        let mut host_stream = host_stream_result.unwrap();
+        send(
+            &mut host_stream,
+            encode(&RedisType::Array(vec![RedisType::BulkString(Some(
+                "ping".to_owned(),
+            ))])),
+        );
+        option_type_guard!(
+            response_bulk_string,
+            decode(&mut host_stream).unwrap(),
+            RedisType::SimpleString
+        );
+        if response_bulk_string.is_none()
+            || response_bulk_string.unwrap().to_ascii_lowercase() != "pong".to_owned()
+        {
+            println!("master didn't respond to ping");
+            return;
+        }
+    }
 
     let mut data_store: Arc<RwLock<HashMap<String, Data>>> = Arc::new(RwLock::new(HashMap::new()));
     let server_info = Arc::new(Server {
-        role: (if replica_args.is_none() {
+        role: (if replica_args_option.is_none() {
             "master"
         } else {
             "slave"
