@@ -22,6 +22,9 @@ struct Data {
 
 struct Server {
     role: String,
+    replid: String,
+    master_replid: String,
+    master_repl_offset: u64,
 }
 
 fn send(stream: &mut impl Write, message: String) {
@@ -81,10 +84,19 @@ fn stream_handler(
             .collect();
 
         match arguments[0].to_ascii_lowercase().as_str() {
-            "info" => send(
-                &mut stream,
-                encode_bulk_string(Some(&("role:".to_owned() + &server_info.role))),
-            ),
+            "info" => {
+                let role = &server_info.role;
+                let master_replid = &server_info.master_replid;
+                let master_repl_offset = &server_info.master_repl_offset;
+                send(
+                    &mut stream,
+                    encode_bulk_string(Some(&format!(
+                        "role:{role}\n\
+                        master_replid:{master_replid}\n\
+                        master_repl_offset:{master_repl_offset}\n",
+                    ))),
+                )
+            }
             "set" => {
                 let key = &arguments[1];
                 let value = &arguments[2];
@@ -180,6 +192,9 @@ fn main() {
             "slave"
         })
         .to_owned(),
+        replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_owned(), // TODO don't hardcode replid
+        master_replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_owned(),
+        master_repl_offset: 0,
     });
 
     let listener =
