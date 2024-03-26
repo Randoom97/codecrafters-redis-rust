@@ -61,6 +61,7 @@ fn stream_handler(mut stream: TcpStream) {
             .collect();
 
         match arguments[0].to_ascii_lowercase().as_str() {
+            "info" => send(&mut stream, encode_bulk_string(Some("role:master"))),
             "set" => {
                 let key = &arguments[1];
                 let value = &arguments[2];
