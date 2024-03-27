@@ -33,6 +33,16 @@ pub fn stream_handler(
             .collect();
 
         match arguments[0].to_ascii_lowercase().as_str() {
+            "psync" => {
+                let master_replid = &server_info.master_replid;
+                let master_repl_offset = &server_info.master_repl_offset;
+                utils::send(
+                    &mut stream,
+                    resp_parser::encode_simple_string(&format!(
+                        "FULLRESYNC {master_replid} {master_repl_offset}"
+                    )),
+                )
+            }
             "replconf" => {
                 utils::send(&mut stream, resp_parser::encode_simple_string("OK"));
             }

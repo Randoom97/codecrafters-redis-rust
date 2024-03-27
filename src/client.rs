@@ -63,5 +63,11 @@ pub fn replicate_server(replica_args: &Vec<&String>, server_port: u64) -> Result
         return Err("master did't respond ok to second REPLCONF".to_owned());
     }
 
+    utils::send(
+        &mut host_stream,
+        resp_parser::encode(&convert_to_redis_command(vec!["PSYNC", "?", "-1"])),
+    );
+    println!("{:?}", resp_parser::decode(&mut host_stream).unwrap());
+
     return Ok(());
 }
