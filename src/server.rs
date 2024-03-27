@@ -33,6 +33,9 @@ pub fn stream_handler(
             .collect();
 
         match arguments[0].to_ascii_lowercase().as_str() {
+            "replconf" => {
+                utils::send(&mut stream, resp_parser::encode_simple_string("OK"));
+            }
             "info" => {
                 let role = &server_info.role;
                 let master_replid = &server_info.master_replid;

@@ -31,12 +31,12 @@ struct Server {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let port = arg_parse::get_u64("--port", &args);
+    let port = arg_parse::get_u64("--port", &args).unwrap_or(6379);
     let replica_args_option = arg_parse::get_n_strings("--replicaof", &args, 2);
 
     if replica_args_option.is_some() {
         let replica_args = replica_args_option.as_ref().unwrap();
-        let result = client::replicate_server(replica_args);
+        let result = client::replicate_server(replica_args, port);
         if result.is_err() {
             println!("{}", result.err().unwrap());
             return;
@@ -56,8 +56,7 @@ fn main() {
         master_repl_offset: 0,
     });
 
-    let listener =
-        TcpListener::bind("127.0.0.1:".to_owned() + &port.unwrap_or(6379).to_string()).unwrap();
+    let listener = TcpListener::bind(format!("127.0.0.1:{port}")).unwrap();
 
     for stream_result in listener.incoming() {
         match stream_result {
