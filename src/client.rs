@@ -68,6 +68,7 @@ pub fn replicate_server(replica_args: &Vec<&String>, server_port: u64) -> Result
         resp_parser::encode(&convert_to_redis_command(vec!["PSYNC", "?", "-1"])),
     );
     println!("{:?}", resp_parser::decode(&mut host_stream).unwrap());
+    println!("{:x?}", resp_parser::decode_rdb(&mut host_stream));
 
     return Ok(());
 }

@@ -214,26 +214,29 @@ pub fn encode(data: &RedisType) -> String {
 }
 
 pub fn encode_simple_string(string: &str) -> String {
-    return "+".to_owned() + string + "\r\n";
+    return format!("+{string}\r\n");
 }
 
 pub fn encode_simple_error(error: &str) -> String {
-    return "-".to_owned() + error + "\r\n";
+    return format!("-{error}\r\n");
 }
 
 pub fn encode_integer(integer: i64) -> String {
-    return ":".to_owned() + &integer.to_string() + "\r\n";
+    return format!(":{integer}\r\n");
 }
 
-pub fn encode_bulk_string(string: Option<&str>) -> String {
-    if string.is_none() {
+pub fn encode_bulk_string(string_option: Option<&str>) -> String {
+    if string_option.is_none() {
         return "$-1\r\n".to_owned(); // null bulk string
     }
-    return "$".to_owned() + &string.unwrap().len().to_string() + "\r\n" + string.unwrap() + "\r\n";
+    let string = string_option.unwrap();
+    let length = string.len();
+    return format!("${length}\r\n{string}\r\n");
 }
 
 pub fn encode_array(array: &Vec<RedisType>) -> String {
-    let mut result = "*".to_owned() + &array.len().to_string() + "\r\n";
+    let length = array.len();
+    let mut result = format!("*{length}\r\n");
     for item in array {
         result += &encode(&item);
     }
@@ -245,29 +248,49 @@ pub fn encode_null() -> String {
 }
 
 pub fn encode_boolean(boolean: bool) -> String {
-    return "#".to_owned() + (if boolean { "t" } else { "f" }) + "\r\n";
+    let boolean_char = if boolean { "t" } else { "f" };
+    return format!("#{boolean_char}\r\n");
 }
 
 pub fn encode_double(double: f64) -> String {
-    return ",".to_owned() + &double.to_string() + "\r\n";
+    return format!(",{double}\r\n");
 }
 
 pub fn encode_big_number(big_number: &BigInt) -> String {
-    return "(".to_owned() + &big_number.to_string() + "\r\n";
+    let big_number_string = big_number.to_string();
+    return format!("({big_number_string}\r\n");
 }
 
 pub fn encode_bulk_error(bulk_error: &str) -> String {
-    return "!".to_owned() + &bulk_error.len().to_string() + "\r\n" + bulk_error + "\r\n";
+    let length = bulk_error.len();
+    return format!("!{length}\r\n{bulk_error}\r\n");
 }
 
 pub fn encode_verbatim_string(string: &str) -> String {
-    return "=".to_owned() + &string.len().to_string() + "\r\n" + string + "\r\n";
+    let length = string.len();
+    return format!("={length}\r\n{string}\r\n");
 }
 
 pub fn encode_push(push: &Vec<RedisType>) -> String {
-    let mut result = "*".to_owned() + &push.len().to_string() + "\r\n";
+    let length = push.len();
+    let mut result = format!("*{length}\r\n");
     for item in push {
         result += &encode(&item);
     }
     return result;
+}
+
+// RDB data is special and shares a signifier byte with bulk strings, so I'm keeping these out of the generic encode/decode methods
+pub fn decode_rdb(reader: &mut impl Read) -> Vec<u8> {
+    read_byte(reader); // discard type bit
+    let length = scan_int(reader).unwrap();
+    return read_n_bytes(reader, length as usize).unwrap();
+}
+
+pub fn encode_rdb(stream: &mut impl Read) -> Vec<u8> {
+    let mut rdb_contents = Vec::new();
+    let size = stream.read_to_end(&mut rdb_contents).unwrap();
+    let mut result_bytes = Vec::from(format!("${size}\r\n").as_bytes());
+    result_bytes.append(&mut rdb_contents);
+    return result_bytes;
 }

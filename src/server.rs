@@ -1,5 +1,7 @@
 use std::{
     collections::HashMap,
+    fs::File,
+    io::Write,
     net::TcpStream,
     sync::{Arc, RwLock},
     time::{Duration, SystemTime},
@@ -41,7 +43,9 @@ pub fn stream_handler(
                     resp_parser::encode_simple_string(&format!(
                         "FULLRESYNC {master_replid} {master_repl_offset}"
                     )),
-                )
+                );
+                let mut empty_rdb_stream = File::open("empty.rdb").unwrap();
+                let _ = stream.write(resp_parser::encode_rdb(&mut empty_rdb_stream).as_slice());
             }
             "replconf" => {
                 utils::send(&mut stream, resp_parser::encode_simple_string("OK"));
