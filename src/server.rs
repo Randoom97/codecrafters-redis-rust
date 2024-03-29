@@ -13,15 +13,27 @@ use crate::{
     Data, Server,
 };
 
+fn send_to_replications(server_info: &Arc<Server>, arguments: &Vec<String>) {
+    let mut stream_vec = server_info.connected_replications.write().unwrap();
+    let arguments_as_str = arguments.iter().map(|s| s.as_str()).collect();
+    let command = resp_parser::encode(&utils::convert_to_redis_command(arguments_as_str));
+    // retain to remove any connections that closed
+    stream_vec.retain(|mut stream| {
+        let write_result = stream.write(&command.as_bytes());
+        return !write_result.is_err();
+    });
+}
+
 pub fn stream_handler(
     mut stream: TcpStream,
     data_store: Arc<RwLock<HashMap<String, Data>>>,
     server_info: Arc<Server>,
+    should_send_on_write: bool,
 ) {
     loop {
         let input_option = resp_parser::decode(&mut stream);
         if input_option.is_none() {
-            break; // socket closed or bad parse
+            return; // socket closed or bad parse
         }
         option_type_guard!(arguments_option, input_option.unwrap(), RedisType::Array);
         // clients should only be sending arrays of bulk strings
@@ -46,13 +58,19 @@ pub fn stream_handler(
                 );
                 let mut empty_rdb_stream = File::open("empty.rdb").unwrap();
                 let _ = stream.write(resp_parser::encode_rdb(&mut empty_rdb_stream).as_slice());
+
+                let mut stream_vec = server_info.connected_replications.write().unwrap();
+                stream_vec.push(stream);
+                drop(stream_vec);
+
+                return; // This connection is now a replication connection that will be handled elsewhere
             }
             "replconf" => {
                 utils::send(&mut stream, resp_parser::encode_simple_string("OK"));
             }
             "info" => {
                 let role = &server_info.role;
-                let master_replid = &server_info.master_replid;
+                let master_replid = &server_info.replid;
                 let master_repl_offset = &server_info.master_repl_offset;
                 utils::send(
                     &mut stream,
@@ -85,9 +103,13 @@ pub fn stream_handler(
                         expire_time,
                     },
                 );
+                // this needs to be inside the map lock to guarantee replicas receive commands in the right order
+                send_to_replications(&server_info, &arguments);
                 drop(map);
 
-                utils::send(&mut stream, resp_parser::encode_simple_string("OK"));
+                if should_send_on_write {
+                    utils::send(&mut stream, resp_parser::encode_simple_string("OK"));
+                }
             }
             "get" => {
                 let key = &arguments[1];

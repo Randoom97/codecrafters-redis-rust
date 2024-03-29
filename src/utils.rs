@@ -1,7 +1,18 @@
 use std::io::Write;
 
+use crate::resp_parser::RedisType;
+
 pub fn send(stream: &mut impl Write, message: String) {
     stream.write(message.as_bytes()).unwrap();
+}
+
+/// converts a Vec\<String\> to RedisType::Array\<RedisType::BulkString\>
+pub fn convert_to_redis_command(command: Vec<&str>) -> RedisType {
+    let mut bulk_string_command: Vec<RedisType> = Vec::new();
+    for part in command {
+        bulk_string_command.push(RedisType::BulkString(Some(part.to_owned())));
+    }
+    return RedisType::Array(bulk_string_command);
 }
 
 pub mod arg_parse {
