@@ -28,7 +28,7 @@ pub fn stream_handler(
     mut stream: TcpStream,
     data_store: Arc<RwLock<HashMap<String, Data>>>,
     server_info: Arc<Server>,
-    should_send_on_write: bool,
+    is_replication_thread: bool,
 ) {
     loop {
         let input_option = resp_parser::decode(&mut stream);
@@ -66,7 +66,18 @@ pub fn stream_handler(
                 return; // This connection is now a replication connection that will be handled elsewhere
             }
             "replconf" => {
-                utils::send(&mut stream, resp_parser::encode_simple_string("OK"));
+                if arguments[1].to_ascii_lowercase() == "getack" {
+                    utils::send(
+                        &mut stream,
+                        resp_parser::encode(&utils::convert_to_redis_command(vec![
+                            "REPLCONF",
+                            "ACK",
+                            server_info.master_repl_offset.to_string().as_str(),
+                        ])),
+                    )
+                } else {
+                    utils::send(&mut stream, resp_parser::encode_simple_string("OK"));
+                }
             }
             "info" => {
                 let role = &server_info.role;
@@ -107,7 +118,7 @@ pub fn stream_handler(
                 send_to_replications(&server_info, &arguments);
                 drop(map);
 
-                if should_send_on_write {
+                if is_replication_thread {
                     utils::send(&mut stream, resp_parser::encode_simple_string("OK"));
                 }
             }
