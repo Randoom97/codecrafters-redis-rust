@@ -26,7 +26,7 @@ struct Server {
     role: String,
     replid: String,
     master_replid: String,
-    master_repl_offset: u64,
+    master_repl_offset: RwLock<u64>,
     connected_replications: RwLock<Vec<TcpStream>>,
 }
 
@@ -62,7 +62,7 @@ fn main() {
         replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_owned(), // TODO don't hardcode replid
         master_replid: master_replid
             .unwrap_or("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_owned()),
-        master_repl_offset: master_repl_offset.unwrap_or(0),
+        master_repl_offset: RwLock::new(master_repl_offset.unwrap_or(0)),
         connected_replications: RwLock::new(Vec::new()),
     });
 
@@ -70,7 +70,7 @@ fn main() {
         let data_store = Arc::clone(&mut data_store);
         let server_info = Arc::clone(&server_info);
         thread::spawn(move || {
-            server::stream_handler(host_stream.unwrap(), data_store, server_info, false)
+            server::stream_handler(host_stream.unwrap(), data_store, server_info, true)
         });
     }
 
@@ -82,7 +82,7 @@ fn main() {
                 let data_store = Arc::clone(&mut data_store);
                 let server_info = Arc::clone(&server_info);
                 thread::spawn(move || {
-                    server::stream_handler(stream, data_store, server_info, true)
+                    server::stream_handler(stream, data_store, server_info, false)
                 });
             }
             Err(e) => {

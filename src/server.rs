@@ -50,7 +50,7 @@ pub fn stream_handler(
         match arguments[0].to_ascii_lowercase().as_str() {
             "psync" => {
                 let master_replid = &server_info.master_replid;
-                let master_repl_offset = &server_info.master_repl_offset;
+                let master_repl_offset = &server_info.master_repl_offset.read().unwrap();
                 utils::send(
                     &mut stream,
                     resp_parser::encode_simple_string(&format!(
@@ -68,12 +68,16 @@ pub fn stream_handler(
             }
             "replconf" => {
                 if arguments[1].to_ascii_lowercase() == "getack" {
+                    let master_repl_offset = server_info.master_repl_offset.read().unwrap();
+                    let master_repl_offset_string = master_repl_offset.to_string();
+                    drop(master_repl_offset);
+
                     utils::send(
                         &mut stream,
                         resp_parser::encode(&utils::convert_to_redis_command(vec![
                             "REPLCONF",
                             "ACK",
-                            server_info.master_repl_offset.to_string().as_str(),
+                            master_repl_offset_string.as_str(),
                         ])),
                     )
                 } else {
@@ -83,13 +87,16 @@ pub fn stream_handler(
             "info" => {
                 let role = &server_info.role;
                 let master_replid = &server_info.replid;
-                let master_repl_offset = &server_info.master_repl_offset;
+                let master_repl_offset = server_info.master_repl_offset.read().unwrap();
+                let master_repl_offset_clone = master_repl_offset.clone();
+                drop(master_repl_offset);
+
                 utils::send(
                     &mut stream,
                     resp_parser::encode_bulk_string(Some(&format!(
                         "role:{role}\n\
                         master_replid:{master_replid}\n\
-                        master_repl_offset:{master_repl_offset}\n",
+                        master_repl_offset:{master_repl_offset_clone}\n",
                     ))),
                 )
             }
@@ -119,7 +126,7 @@ pub fn stream_handler(
                 send_to_replications(&server_info, &arguments);
                 drop(map);
 
-                if is_replication_thread {
+                if !is_replication_thread {
                     utils::send(&mut stream, resp_parser::encode_simple_string("OK"));
                 }
             }
@@ -178,6 +185,12 @@ pub fn stream_handler(
                     resp_parser::encode_simple_error("Error, unsupported command"),
                 );
             }
+        }
+
+        if is_replication_thread {
+            let mut master_repl_offset = server_info.master_repl_offset.write().unwrap();
+            *master_repl_offset += bytes_read;
+            drop(master_repl_offset);
         }
     }
 }
