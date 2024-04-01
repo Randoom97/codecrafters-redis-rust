@@ -45,6 +45,13 @@ fn parse_arguments(stream: &mut impl Read) -> Option<(Vec<String>, u64)> {
     ));
 }
 
+fn wait(stream: &mut impl Write, arguments: &Vec<String>) {
+    let replica_count = str::parse::<u64>(&arguments[1]).unwrap();
+    if replica_count == 0 {
+        utils::send(stream, resp_parser::encode_integer(0));
+    }
+}
+
 fn psync(mut stream: TcpStream, server_info: &Arc<Server>) {
     let master_replid = &server_info.master_replid;
     let master_repl_offset = &server_info.master_repl_offset.read().unwrap();
@@ -215,6 +222,7 @@ pub fn stream_handler(
         let (arguments, _) = arguments_option.unwrap();
 
         match arguments[0].to_ascii_lowercase().as_str() {
+            "wait" => wait(&mut stream, &arguments),
             "psync" => {
                 psync(stream, &server_info);
                 return; // This connection is now a replication connection that will be handled elsewhere
