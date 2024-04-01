@@ -6,11 +6,8 @@ use crate::{
 };
 
 fn expect_response(host_stream: &mut impl Read, expected_response: &str) -> bool {
-    option_type_guard!(
-        response_simple_string,
-        resp_parser::decode(host_stream).unwrap(),
-        RedisType::SimpleString
-    );
+    let (response, _) = resp_parser::decode(host_stream).unwrap();
+    option_type_guard!(response_simple_string, response, RedisType::SimpleString);
     return !response_simple_string.is_none()
         && response_simple_string.unwrap().to_ascii_lowercase() == expected_response;
 }
@@ -61,11 +58,8 @@ pub fn replicate_server(
         &mut host_stream,
         resp_parser::encode(&utils::convert_to_redis_command(vec!["PSYNC", "?", "-1"])),
     );
-    option_type_guard!(
-        response_option,
-        resp_parser::decode(&mut host_stream).unwrap(),
-        RedisType::SimpleString
-    );
+    let (response, _) = resp_parser::decode(&mut host_stream).unwrap();
+    option_type_guard!(response_option, response, RedisType::SimpleString);
     let response = response_option.unwrap();
     let parts = response.split(' ').collect::<Vec<&str>>();
     let master_replid = parts[1];

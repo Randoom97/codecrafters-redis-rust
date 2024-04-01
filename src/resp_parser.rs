@@ -36,18 +36,20 @@ fn read_byte(reader: &mut impl Read) -> Option<u8> {
     return Some(byte_vec[0]);
 }
 
-fn read_to_next_crlf(reader: &mut impl Read) -> Option<Vec<u8>> {
+fn read_to_next_crlf(reader: &mut impl Read) -> Option<(Vec<u8>, u64)> {
     let mut result = Vec::new();
     let mut cr_found = false;
+    let mut bytes_read = 0;
     loop {
         option_get_or_return_none!(byte, read_byte(reader));
+        bytes_read += 1;
         match byte {
             b'\r' => {
                 cr_found = true;
             }
             b'\n' => {
                 if cr_found {
-                    return Some(result);
+                    return Some((result, bytes_read));
                 } else {
                     result.push(byte);
                 }
@@ -63,99 +65,113 @@ fn read_to_next_crlf(reader: &mut impl Read) -> Option<Vec<u8>> {
     }
 }
 
-fn scan_string(reader: &mut impl Read) -> Option<String> {
-    option_get_or_return_none!(bytes, read_to_next_crlf(reader));
+fn scan_string(reader: &mut impl Read) -> Option<(String, u64)> {
+    option_get_or_return_none!(bytes_and_count, read_to_next_crlf(reader));
+    let (bytes, bytes_read) = bytes_and_count;
     result_get_or_return_none!(string, from_utf8(&bytes));
-    return Some(string.to_string());
+    return Some((string.to_string(), bytes_read));
 }
 
-fn scan_int(reader: &mut impl Read) -> Option<i64> {
-    option_get_or_return_none!(string, scan_string(reader));
+fn scan_int(reader: &mut impl Read) -> Option<(i64, u64)> {
+    option_get_or_return_none!(string_and_count, scan_string(reader));
+    let (string, bytes_read) = string_and_count;
     result_get_or_return_none!(integer, str::parse::<i64>(&string));
-    return Some(integer);
+    return Some((integer, bytes_read));
 }
 
-fn bulk_string(reader: &mut impl Read) -> Option<Option<String>> {
-    option_get_or_return_none!(length, scan_int(reader));
+fn bulk_string(reader: &mut impl Read) -> Option<(Option<String>, u64)> {
+    option_get_or_return_none!(length_and_count, scan_int(reader));
+    let (length, bytes_read) = length_and_count;
     if length < 0 {
-        return Some(None);
+        return Some((None, bytes_read));
     }
     option_get_or_return_none!(bytes, read_n_bytes(reader, length as usize + 2)); // +2 to get the extra crlf
     result_get_or_return_none!(string, from_utf8(&bytes[..length as usize]));
-    return Some(Some(string.to_string()));
+    return Some((Some(string.to_string()), bytes_read + length as u64 + 2));
 }
 
-pub fn decode(reader: &mut impl Read) -> Option<RedisType> {
+pub fn decode(reader: &mut impl Read) -> Option<(RedisType, u64)> {
     option_get_or_return_none!(type_byte, read_byte(reader));
 
     match type_byte {
         // simple strings
         b'+' => {
-            option_get_or_return_none!(string, scan_string(reader));
-            return Some(RedisType::SimpleString(string));
+            option_get_or_return_none!(string_and_count, scan_string(reader));
+            let (string, bytes_read) = string_and_count;
+            return Some((RedisType::SimpleString(string), bytes_read + 1));
         }
         // simple errors
         b'-' => {
-            option_get_or_return_none!(string, scan_string(reader));
-            return Some(RedisType::SimpleError(string));
+            option_get_or_return_none!(string_and_count, scan_string(reader));
+            let (string, bytes_read) = string_and_count;
+            return Some((RedisType::SimpleError(string), bytes_read + 1));
         }
         // integers
         b':' => {
-            option_get_or_return_none!(integer, scan_int(reader));
-            return Some(RedisType::Integer(integer));
+            option_get_or_return_none!(integer_and_count, scan_int(reader));
+            let (integer, bytes_read) = integer_and_count;
+            return Some((RedisType::Integer(integer), bytes_read + 1));
         }
         // bulk strings
         b'$' => {
-            option_get_or_return_none!(string, bulk_string(reader));
-            return Some(RedisType::BulkString(string));
+            option_get_or_return_none!(string_and_count, bulk_string(reader));
+            let (string, bytes_read) = string_and_count;
+            return Some((RedisType::BulkString(string), bytes_read + 1));
         }
         // arrays
         b'*' => {
-            option_get_or_return_none!(length, scan_int(reader));
+            option_get_or_return_none!(length_and_count, scan_int(reader));
+            let (length, mut bytes_read) = length_and_count;
             let mut array: Vec<RedisType> = Vec::with_capacity(length as usize);
             for _ in 0..length {
-                option_get_or_return_none!(value, decode(reader));
+                option_get_or_return_none!(value_and_count, decode(reader));
+                let (value, bytes_read_for_value) = value_and_count;
+                bytes_read += bytes_read_for_value;
                 array.push(value);
             }
-            return Some(RedisType::Array(array));
+            return Some((RedisType::Array(array), bytes_read + 1));
         }
         // nulls
         b'_' => {
             option_get_or_return_none!(_unused, read_n_bytes(reader, 2)); // skip the crlf for the next decode
-            return Some(RedisType::Null);
+            return Some((RedisType::Null, 3));
         }
         // booleans
         b'#' => {
             option_get_or_return_none!(boolean_byte, read_byte(reader));
             match boolean_byte {
-                b't' => return Some(RedisType::Boolean(true)),
-                b'f' => return Some(RedisType::Boolean(false)),
+                b't' => return Some((RedisType::Boolean(true), 4)),
+                b'f' => return Some((RedisType::Boolean(false), 4)),
                 _ => return None,
             }
         }
         // doubles
         b',' => {
-            option_get_or_return_none!(string, scan_string(reader));
+            option_get_or_return_none!(string_and_count, scan_string(reader));
+            let (string, bytes_read) = string_and_count;
             result_get_or_return_none!(double, str::parse::<f64>(&string));
-            return Some(RedisType::Double(double));
+            return Some((RedisType::Double(double), bytes_read + 1));
         }
         // big numbers
         b'(' => {
-            option_get_or_return_none!(string, scan_string(reader));
+            option_get_or_return_none!(string_and_count, scan_string(reader));
+            let (string, bytes_read) = string_and_count;
             result_get_or_return_none!(big_int, BigInt::from_str(&string));
-            return Some(RedisType::BigNumber(big_int));
+            return Some((RedisType::BigNumber(big_int), bytes_read + 1));
         }
         // bulk errors
         b'!' => {
-            option_get_or_return_none!(error_option, bulk_string(reader));
+            option_get_or_return_none!(error_option_and_count, bulk_string(reader));
+            let (error_option, bytes_read) = error_option_and_count;
             option_get_or_return_none!(error, error_option);
-            return Some(RedisType::BulkError(error));
+            return Some((RedisType::BulkError(error), bytes_read + 1));
         }
         // verbatim strings
         b'=' => {
-            option_get_or_return_none!(string_option, bulk_string(reader));
+            option_get_or_return_none!(string_option_and_count, bulk_string(reader));
+            let (string_option, bytes_read) = string_option_and_count;
             option_get_or_return_none!(string, string_option);
-            return Some(RedisType::VerbatimString(string));
+            return Some((RedisType::VerbatimString(string), bytes_read + 1));
         }
         // TODO fix hashing and equals issues on RedisType
         /*// maps
@@ -181,13 +197,16 @@ pub fn decode(reader: &mut impl Read) -> Option<RedisType> {
         }*/
         // pushes
         b'>' => {
-            option_get_or_return_none!(length, scan_int(reader));
+            option_get_or_return_none!(length_and_count, scan_int(reader));
+            let (length, mut bytes_read) = length_and_count;
             let mut array: Vec<RedisType> = Vec::with_capacity(length as usize);
             for _ in 0..length {
-                option_get_or_return_none!(value, decode(reader));
+                option_get_or_return_none!(value_and_count, decode(reader));
+                let (value, bytes_read_for_value) = value_and_count;
+                bytes_read += bytes_read_for_value;
                 array.push(value);
             }
-            return Some(RedisType::Push(array));
+            return Some((RedisType::Push(array), bytes_read + 1));
         }
         _ => {
             println!("data type {:?} not handled", type_byte);
@@ -283,7 +302,7 @@ pub fn encode_push(push: &Vec<RedisType>) -> String {
 // RDB data is special and shares a signifier byte with bulk strings, so I'm keeping these out of the generic encode/decode methods
 pub fn decode_rdb(reader: &mut impl Read) -> Vec<u8> {
     read_byte(reader); // discard type bit
-    let length = scan_int(reader).unwrap();
+    let length = scan_int(reader).unwrap().0;
     return read_n_bytes(reader, length as usize).unwrap();
 }
 

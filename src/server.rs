@@ -35,7 +35,8 @@ pub fn stream_handler(
         if input_option.is_none() {
             return; // socket closed or bad parse
         }
-        option_type_guard!(arguments_option, input_option.unwrap(), RedisType::Array);
+        let (input, bytes_read) = input_option.unwrap();
+        option_type_guard!(arguments_option, input, RedisType::Array);
         // clients should only be sending arrays of bulk strings
         let arguments: Vec<String> = arguments_option
             .unwrap()
