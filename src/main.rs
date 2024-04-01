@@ -70,7 +70,7 @@ fn main() {
         let data_store = Arc::clone(&mut data_store);
         let server_info = Arc::clone(&server_info);
         thread::spawn(move || {
-            server::stream_handler(host_stream.unwrap(), data_store, server_info, true)
+            server::replication_stream_handler(host_stream.unwrap(), data_store, server_info)
         });
     }
 
@@ -81,9 +81,7 @@ fn main() {
             Ok(stream) => {
                 let data_store = Arc::clone(&mut data_store);
                 let server_info = Arc::clone(&server_info);
-                thread::spawn(move || {
-                    server::stream_handler(stream, data_store, server_info, false)
-                });
+                thread::spawn(move || server::stream_handler(stream, data_store, server_info));
             }
             Err(e) => {
                 println!("error: {}", e);
