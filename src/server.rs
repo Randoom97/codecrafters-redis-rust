@@ -4,25 +4,16 @@ use std::{
     io::{Read, Write},
     net::TcpStream,
     sync::{Arc, RwLock},
+    thread,
     time::{Duration, SystemTime},
 };
 
 use crate::{
+    replication::{self, Replication},
     resp_parser::{self, RedisType},
     utils::{self, arg_parse},
     Data, Server,
 };
-
-fn send_to_replications(server_info: &Arc<Server>, arguments: &Vec<String>) {
-    let mut stream_vec = server_info.connected_replications.write().unwrap();
-    let arguments_as_str = arguments.iter().map(|s| s.as_str()).collect();
-    let command = resp_parser::encode(&utils::convert_to_redis_command(arguments_as_str));
-    // retain to remove any connections that closed
-    stream_vec.retain(|mut stream| {
-        let write_result = stream.write(&command.as_bytes());
-        return !write_result.is_err();
-    });
-}
 
 fn parse_arguments(stream: &mut impl Read) -> Option<(Vec<String>, u64)> {
     let input_option = resp_parser::decode(stream);
@@ -46,12 +37,64 @@ fn parse_arguments(stream: &mut impl Read) -> Option<(Vec<String>, u64)> {
 }
 
 fn wait(stream: &mut impl Write, arguments: &Vec<String>, server_info: &Arc<Server>) {
-    let connected_replications = server_info.connected_replications.read().unwrap();
-    let replication_count = connected_replications.len();
-    drop(connected_replications);
+    let required_replication_count = str::parse::<u64>(&arguments[1]).unwrap();
+    let timeout = str::parse::<u64>(&arguments[2]).unwrap();
+    let timeout_time = SystemTime::now()
+        .checked_add(Duration::from_millis(timeout))
+        .unwrap();
+
+    let master_repl_offset = server_info.master_repl_offset.read().unwrap();
+    let expected_offset = *master_repl_offset;
+    drop(master_repl_offset);
+
+    // edge case of no commands ever sent
+    if expected_offset == 0 {
+        let connected_replications = server_info.connected_replications.read().unwrap();
+        let replication_count = connected_replications.len();
+        drop(connected_replications);
+        utils::send(
+            stream,
+            resp_parser::encode_integer(replication_count as i64),
+        );
+        return;
+    }
+
+    replication::queue_send_to_replications(
+        &server_info,
+        resp_parser::encode(&utils::convert_to_redis_command(vec![
+            "REPLCONF", "GETACK", "*",
+        ])),
+    );
+
+    let mut max_replication_count: u64 = 0;
+    loop {
+        if SystemTime::now().ge(&timeout_time) {
+            break;
+        }
+        let mut replication_count = 0;
+        let connected_replications = server_info.connected_replications.read().unwrap();
+        for replication in connected_replications.iter() {
+            let master_repl_offset = replication.master_repl_offset.read().unwrap();
+            if *master_repl_offset >= expected_offset {
+                replication_count += 1;
+            }
+        }
+        drop(connected_replications);
+
+        if replication_count > max_replication_count {
+            max_replication_count = replication_count;
+        }
+
+        if max_replication_count >= required_replication_count {
+            break;
+        }
+
+        thread::sleep(Duration::from_millis(50));
+    }
+
     utils::send(
         stream,
-        resp_parser::encode_integer(replication_count as i64),
+        resp_parser::encode_integer(max_replication_count as i64),
     );
 }
 
@@ -67,8 +110,13 @@ fn psync(mut stream: TcpStream, server_info: &Arc<Server>) {
     let mut empty_rdb_stream = File::open("empty.rdb").unwrap();
     let _ = stream.write(resp_parser::encode_rdb(&mut empty_rdb_stream).as_slice());
 
+    stream.set_nonblocking(true).unwrap();
     let mut stream_vec = server_info.connected_replications.write().unwrap();
-    stream_vec.push(stream);
+    stream_vec.push(Replication {
+        stream,
+        send_buffer: RwLock::new(Vec::new()),
+        master_repl_offset: RwLock::new(0),
+    });
     drop(stream_vec);
 }
 
@@ -113,7 +161,7 @@ fn set(
     arguments: &Vec<String>,
     data_store: &Arc<RwLock<HashMap<String, Data>>>,
     server_info: &Arc<Server>,
-    should_send_response: bool,
+    is_replication_connection: bool,
 ) {
     let key = &arguments[1];
     let value = &arguments[2];
@@ -137,10 +185,14 @@ fn set(
         },
     );
     // this needs to be inside the map lock to guarantee replicas receive commands in the right order
-    send_to_replications(&server_info, &arguments);
+    if !is_replication_connection {
+        let arguments_as_str = arguments.iter().map(|s| s.as_str()).collect();
+        let command = resp_parser::encode(&utils::convert_to_redis_command(arguments_as_str));
+        replication::queue_send_to_replications(&server_info, command);
+    }
     drop(map);
 
-    if should_send_response {
+    if !is_replication_connection {
         utils::send(stream, resp_parser::encode_simple_string("OK"));
     }
 }
@@ -202,7 +254,7 @@ pub fn replication_stream_handler(
 
         match arguments[0].to_ascii_lowercase().as_str() {
             "replconf" => replconf(&mut stream, &arguments, &server_info),
-            "set" => set(&mut stream, &arguments, &data_store, &server_info, false),
+            "set" => set(&mut stream, &arguments, &data_store, &server_info, true),
             _ => {}
         }
 
@@ -232,7 +284,7 @@ pub fn stream_handler(
             }
             "replconf" => replconf(&mut stream, &arguments, &server_info),
             "info" => info(&mut stream, &server_info),
-            "set" => set(&mut stream, &arguments, &data_store, &server_info, true),
+            "set" => set(&mut stream, &arguments, &data_store, &server_info, false),
             "get" => get(&mut stream, &arguments, &data_store),
             "echo" => utils::send(
                 &mut stream,

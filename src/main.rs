@@ -1,6 +1,7 @@
 #[macro_use]
 mod macros;
 mod client;
+mod replication;
 mod resp_parser;
 mod server;
 mod utils;
@@ -14,6 +15,7 @@ use std::{
     time::SystemTime,
 };
 
+use replication::Replication;
 use utils::arg_parse;
 
 #[derive(Debug)]
@@ -27,7 +29,7 @@ struct Server {
     replid: String,
     master_replid: String,
     master_repl_offset: RwLock<u64>,
-    connected_replications: RwLock<Vec<TcpStream>>,
+    connected_replications: RwLock<Vec<Replication>>,
 }
 
 fn main() {
@@ -71,6 +73,11 @@ fn main() {
         let server_info = Arc::clone(&server_info);
         thread::spawn(move || {
             server::replication_stream_handler(host_stream.unwrap(), data_store, server_info)
+        });
+    } else {
+        let server_info = Arc::clone(&server_info);
+        thread::spawn(move || {
+            replication::replication_loop(server_info);
         });
     }
 
