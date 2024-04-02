@@ -7,9 +7,9 @@ pub fn send(stream: &mut impl Write, message: String) {
 }
 
 /// converts a Vec\<String\> to RedisType::Array\<RedisType::BulkString\>
-pub fn convert_to_redis_command(command: Vec<&str>) -> RedisType {
+pub fn convert_to_redis_bulk_string_array(strings: Vec<&str>) -> RedisType {
     let mut bulk_string_command: Vec<RedisType> = Vec::new();
-    for part in command {
+    for part in strings {
         bulk_string_command.push(RedisType::BulkString(Some(part.to_owned())));
     }
     return RedisType::Array(bulk_string_command);

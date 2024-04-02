@@ -26,7 +26,7 @@ pub fn replicate_server(
 
     utils::send(
         &mut host_stream,
-        resp_parser::encode(&utils::convert_to_redis_command(vec!["ping"])),
+        resp_parser::encode(&utils::convert_to_redis_bulk_string_array(vec!["ping"])),
     );
     if !expect_response(&mut host_stream, "pong") {
         return Err("master did not respond to ping".to_owned());
@@ -34,7 +34,7 @@ pub fn replicate_server(
 
     utils::send(
         &mut host_stream,
-        resp_parser::encode(&utils::convert_to_redis_command(vec![
+        resp_parser::encode(&utils::convert_to_redis_bulk_string_array(vec![
             "REPLCONF",
             "listening-port",
             &server_port.to_string(),
@@ -46,7 +46,7 @@ pub fn replicate_server(
 
     utils::send(
         &mut host_stream,
-        resp_parser::encode(&utils::convert_to_redis_command(vec![
+        resp_parser::encode(&utils::convert_to_redis_bulk_string_array(vec![
             "REPLCONF", "capa", "psync2",
         ])),
     );
@@ -56,7 +56,9 @@ pub fn replicate_server(
 
     utils::send(
         &mut host_stream,
-        resp_parser::encode(&utils::convert_to_redis_command(vec!["PSYNC", "?", "-1"])),
+        resp_parser::encode(&utils::convert_to_redis_bulk_string_array(vec![
+            "PSYNC", "?", "-1",
+        ])),
     );
     let (response, _) = resp_parser::decode(&mut host_stream).unwrap();
     option_type_guard!(response_option, response, RedisType::SimpleString);
