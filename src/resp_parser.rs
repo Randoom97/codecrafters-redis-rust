@@ -6,6 +6,8 @@ use std::{
     str::from_utf8,
 };
 
+use crate::utils::byte_stream;
+
 // #[derive(Eq, Hash, PartialEq)]
 #[derive(Debug)]
 pub enum RedisType {
@@ -25,23 +27,12 @@ pub enum RedisType {
     Push(Vec<RedisType>),
 }
 
-fn read_n_bytes(reader: &mut impl Read, n: usize) -> Option<Vec<u8>> {
-    let mut buffer = vec![0u8; n];
-    result_get_or_return_none!(_unused, reader.read_exact(&mut buffer));
-    return Some(buffer);
-}
-
-fn read_byte(reader: &mut impl Read) -> Option<u8> {
-    option_get_or_return_none!(byte_vec, read_n_bytes(reader, 1));
-    return Some(byte_vec[0]);
-}
-
 fn read_to_next_crlf(reader: &mut impl Read) -> Option<(Vec<u8>, u64)> {
     let mut result = Vec::new();
     let mut cr_found = false;
     let mut bytes_read = 0;
     loop {
-        option_get_or_return_none!(byte, read_byte(reader));
+        option_get_or_return_none!(byte, byte_stream::read_byte(reader));
         bytes_read += 1;
         match byte {
             b'\r' => {
@@ -85,13 +76,16 @@ fn bulk_string(reader: &mut impl Read) -> Option<(Option<String>, u64)> {
     if length < 0 {
         return Some((None, bytes_read));
     }
-    option_get_or_return_none!(bytes, read_n_bytes(reader, length as usize + 2)); // +2 to get the extra crlf
+    option_get_or_return_none!(
+        bytes,
+        byte_stream::read_n_bytes(reader, length as usize + 2)
+    ); // +2 to get the extra crlf
     result_get_or_return_none!(string, from_utf8(&bytes[..length as usize]));
     return Some((Some(string.to_string()), bytes_read + length as u64 + 2));
 }
 
 pub fn decode(reader: &mut impl Read) -> Option<(RedisType, u64)> {
-    option_get_or_return_none!(type_byte, read_byte(reader));
+    option_get_or_return_none!(type_byte, byte_stream::read_byte(reader));
 
     match type_byte {
         // simple strings
@@ -133,12 +127,12 @@ pub fn decode(reader: &mut impl Read) -> Option<(RedisType, u64)> {
         }
         // nulls
         b'_' => {
-            option_get_or_return_none!(_unused, read_n_bytes(reader, 2)); // skip the crlf for the next decode
+            option_get_or_return_none!(_unused, byte_stream::read_n_bytes(reader, 2)); // skip the crlf for the next decode
             return Some((RedisType::Null, 3));
         }
         // booleans
         b'#' => {
-            option_get_or_return_none!(boolean_byte, read_byte(reader));
+            option_get_or_return_none!(boolean_byte, byte_stream::read_byte(reader));
             match boolean_byte {
                 b't' => return Some((RedisType::Boolean(true), 4)),
                 b'f' => return Some((RedisType::Boolean(false), 4)),
@@ -301,9 +295,9 @@ pub fn encode_push(push: &Vec<RedisType>) -> String {
 
 // RDB data is special and shares a signifier byte with bulk strings, so I'm keeping these out of the generic encode/decode methods
 pub fn decode_rdb(reader: &mut impl Read) -> Vec<u8> {
-    read_byte(reader); // discard type bit
+    byte_stream::read_byte(reader); // discard type bit
     let length = scan_int(reader).unwrap().0;
-    return read_n_bytes(reader, length as usize).unwrap();
+    return byte_stream::read_n_bytes(reader, length as usize).unwrap();
 }
 
 pub fn encode_rdb(stream: &mut impl Read) -> Vec<u8> {

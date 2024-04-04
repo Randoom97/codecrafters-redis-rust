@@ -49,6 +49,26 @@ mod commands {
         Data, Server,
     };
 
+    pub fn keys(stream: &mut impl Write, data_store: &Arc<RwLock<HashMap<String, Data>>>) {
+        let map = data_store.read().unwrap();
+        let mut keys: Vec<&String> = map.keys().collect();
+        let now = SystemTime::now();
+        keys.retain(|key| {
+            let value_option = map.get(*key);
+            if value_option.is_some() && value_option.unwrap().expire_time.is_some() {
+                return value_option.unwrap().expire_time.unwrap().gt(&now);
+            }
+            return true;
+        });
+
+        utils::send(
+            stream,
+            resp_parser::encode(&utils::convert_to_redis_bulk_string_array(
+                keys.iter().map(|s| s.as_str()).collect(),
+            )),
+        );
+    }
+
     pub fn config(stream: &mut impl Write, arguments: &Vec<String>, server_info: &Arc<Server>) {
         match arguments[2].to_ascii_lowercase().as_str() {
             "dir" => utils::send(
@@ -143,7 +163,7 @@ mod commands {
                 "FULLRESYNC {master_replid} {master_repl_offset}"
             )),
         );
-        let filepath = server_info.dir.clone() + &server_info.dbfilename;
+        let filepath = server_info.dir.clone() + "/" + &server_info.dbfilename;
         let mut empty_rdb_stream = File::open(filepath).unwrap();
         let _ = stream.write(resp_parser::encode_rdb(&mut empty_rdb_stream).as_slice());
 
@@ -318,6 +338,7 @@ pub fn stream_handler(
         let (arguments, _) = arguments_option.unwrap();
 
         match arguments[0].to_ascii_lowercase().as_str() {
+            "keys" => commands::keys(&mut stream, &data_store),
             "config" => commands::config(&mut stream, &arguments, &server_info),
             "wait" => commands::wait(&mut stream, &arguments, &server_info),
             "psync" => {

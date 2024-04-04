@@ -15,6 +15,21 @@ pub fn convert_to_redis_bulk_string_array(strings: Vec<&str>) -> RedisType {
     return RedisType::Array(bulk_string_command);
 }
 
+pub mod byte_stream {
+    use std::io::Read;
+
+    pub fn read_n_bytes(reader: &mut impl Read, n: usize) -> Option<Vec<u8>> {
+        let mut buffer = vec![0u8; n];
+        result_get_or_return_none!(_unused, reader.read_exact(&mut buffer));
+        return Some(buffer);
+    }
+
+    pub fn read_byte(reader: &mut impl Read) -> Option<u8> {
+        option_get_or_return_none!(byte_vec, read_n_bytes(reader, 1));
+        return Some(byte_vec[0]);
+    }
+}
+
 pub mod arg_parse {
     pub fn get_n_strings<'a>(
         token: &str,

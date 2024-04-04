@@ -1,6 +1,7 @@
 #[macro_use]
 mod macros;
 mod client;
+mod rdb;
 mod replication;
 mod resp_parser;
 mod server;
@@ -70,9 +71,14 @@ fn main() {
             .unwrap_or("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_owned()),
         master_repl_offset: RwLock::new(master_repl_offset.unwrap_or(0)),
         connected_replications: RwLock::new(Vec::new()),
-        dir: dir.unwrap_or(&"./".to_string()).to_owned(),
+        dir: dir.unwrap_or(&".".to_string()).to_owned(),
         dbfilename: dbfilename.unwrap_or(&"empty.rdb".to_string()).to_owned(),
     });
+
+    rdb::load_rdb(
+        server_info.dir.clone() + "/" + &server_info.dbfilename,
+        &data_store,
+    );
 
     if host_stream.is_some() {
         let data_store = Arc::clone(&mut data_store);
