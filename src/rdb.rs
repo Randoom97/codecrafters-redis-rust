@@ -7,7 +7,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use crate::{utils::byte_stream, Data};
+use crate::{utils::byte_stream, Data, DataType};
 
 fn read_length(stream: &mut impl Read) -> (u32, bool) {
     let first_byte = byte_stream::read_byte(stream).unwrap();
@@ -114,7 +114,7 @@ pub fn load_rdb(filepath: String, data_store: &Arc<RwLock<HashMap<String, Data>>
                 map.insert(
                     key,
                     Data {
-                        value,
+                        value: DataType::String(value),
                         expire_time: Some(
                             SystemTime::UNIX_EPOCH + Duration::from_secs(expire_time_s as u64),
                         ),
@@ -135,7 +135,7 @@ pub fn load_rdb(filepath: String, data_store: &Arc<RwLock<HashMap<String, Data>>
                 map.insert(
                     key,
                     Data {
-                        value,
+                        value: DataType::String(value),
                         expire_time: Some(
                             SystemTime::UNIX_EPOCH + Duration::from_millis(expire_time_ms),
                         ),
@@ -164,7 +164,7 @@ pub fn load_rdb(filepath: String, data_store: &Arc<RwLock<HashMap<String, Data>>
                 map.insert(
                     key,
                     Data {
-                        value,
+                        value: DataType::String(value),
                         expire_time: None,
                     },
                 );

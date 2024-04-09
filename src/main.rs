@@ -21,8 +21,14 @@ use utils::arg_parse;
 
 #[derive(Debug)]
 struct Data {
-    value: String,
+    value: DataType,
     expire_time: Option<SystemTime>,
+}
+
+#[derive(Debug)]
+pub enum DataType {
+    String(String),
+    Stream(HashMap<String, HashMap<String, String>>),
 }
 
 struct Server {

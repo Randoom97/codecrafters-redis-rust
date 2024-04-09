@@ -46,8 +46,44 @@ mod commands {
         replication::{self, Replication},
         resp_parser,
         utils::{self, arg_parse},
-        Data, Server,
+        Data, DataType, Server,
     };
+
+    pub fn xadd(
+        stream: &mut impl Write,
+        arguments: &Vec<String>,
+        data_store: &Arc<RwLock<HashMap<String, Data>>>,
+    ) {
+        let key = &arguments[1];
+        let id = &arguments[2];
+
+        let mut map = data_store.write().unwrap();
+        if !map.contains_key(key) {
+            map.insert(
+                key.clone(),
+                Data {
+                    value: DataType::Stream(HashMap::new()),
+                    expire_time: None,
+                },
+            );
+        }
+
+        let value = match &mut map.get_mut(key).unwrap().value {
+            DataType::Stream(value) => Some(value),
+            _ => None,
+        }
+        .unwrap();
+
+        let mut entry = HashMap::new();
+        for i in (3..((arguments.len() / 2) * 2) - 1).step_by(2) {
+            entry.insert(arguments[i].clone(), arguments[i + 1].clone());
+        }
+
+        value.insert(id.clone(), entry);
+        drop(map);
+
+        utils::send(stream, resp_parser::encode_bulk_string(Some(id)));
+    }
 
     pub fn value_type(
         stream: &mut impl Write,
@@ -55,7 +91,7 @@ mod commands {
         data_store: &Arc<RwLock<HashMap<String, Data>>>,
     ) {
         let key = &arguments[1];
-        let mut value: Option<&String> = None;
+        let mut response = "none";
 
         let map = data_store.read().unwrap();
         let data_option = map.get(key);
@@ -64,10 +100,12 @@ mod commands {
             if data.expire_time.is_none()
                 || SystemTime::now().le(data.expire_time.as_ref().unwrap())
             {
-                value = Some(&data.value);
+                match data.value {
+                    DataType::String(_) => response = "string",
+                    DataType::Stream(_) => response = "stream",
+                }
             }
         }
-        let response = if value.is_some() { "string" } else { "none" };
         drop(map);
 
         utils::send(stream, resp_parser::encode_simple_string(response));
@@ -261,7 +299,7 @@ mod commands {
         map.insert(
             key.to_owned(),
             Data {
-                value: value.to_owned(),
+                value: DataType::String(value.to_owned()),
                 expire_time,
             },
         );
@@ -296,9 +334,17 @@ mod commands {
                 && SystemTime::now().gt(data.expire_time.as_ref().unwrap())
             {
                 expired = true;
-                response = None;
             } else {
-                response = Some(resp_parser::encode_bulk_string(Some(&data.value)));
+                match &data.value {
+                    DataType::String(value) => {
+                        response = Some(resp_parser::encode_bulk_string(Some(value)))
+                    }
+                    _ => {
+                        response = Some(resp_parser::encode_simple_error(
+                            "Error, wrongtype operation",
+                        ))
+                    }
+                }
             }
         }
         drop(map);
@@ -362,6 +408,7 @@ pub fn stream_handler(
         let (arguments, _) = arguments_option.unwrap();
 
         match arguments[0].to_ascii_lowercase().as_str() {
+            "xadd" => commands::xadd(&mut stream, &arguments, &data_store),
             "type" => commands::value_type(&mut stream, &arguments, &data_store), // can't be 'type' because rust
             "keys" => commands::keys(&mut stream, &data_store),
             "config" => commands::config(&mut stream, &arguments, &server_info),
