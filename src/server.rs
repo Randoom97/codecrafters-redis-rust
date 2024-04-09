@@ -49,6 +49,30 @@ mod commands {
         Data, Server,
     };
 
+    pub fn value_type(
+        stream: &mut impl Write,
+        arguments: &Vec<String>,
+        data_store: &Arc<RwLock<HashMap<String, Data>>>,
+    ) {
+        let key = &arguments[1];
+        let mut value: Option<&String> = None;
+
+        let map = data_store.read().unwrap();
+        let data_option = map.get(key);
+        if data_option.is_some() {
+            let data = data_option.unwrap();
+            if data.expire_time.is_none()
+                || SystemTime::now().le(data.expire_time.as_ref().unwrap())
+            {
+                value = Some(&data.value);
+            }
+        }
+        let response = if value.is_some() { "string" } else { "none" };
+        drop(map);
+
+        utils::send(stream, resp_parser::encode_simple_string(response));
+    }
+
     pub fn keys(stream: &mut impl Write, data_store: &Arc<RwLock<HashMap<String, Data>>>) {
         let map = data_store.read().unwrap();
         let mut keys: Vec<&String> = map.keys().collect();
@@ -338,6 +362,7 @@ pub fn stream_handler(
         let (arguments, _) = arguments_option.unwrap();
 
         match arguments[0].to_ascii_lowercase().as_str() {
+            "type" => commands::value_type(&mut stream, &arguments, &data_store), // can't be 'type' because rust
             "keys" => commands::keys(&mut stream, &data_store),
             "config" => commands::config(&mut stream, &arguments, &server_info),
             "wait" => commands::wait(&mut stream, &arguments, &server_info),
