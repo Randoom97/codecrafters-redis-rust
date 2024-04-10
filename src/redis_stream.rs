@@ -16,39 +16,46 @@ impl RedisStream {
         };
     }
 
-    pub fn insert(&mut self, id: String, value: HashMap<String, String>) -> Result<(), String> {
+    pub fn insert(&mut self, id: String, value: HashMap<String, String>) -> Result<String, String> {
+        if id == "0-0" {
+            return Err("ERR The ID specified in XADD must be greater than 0-0".to_owned());
+        }
+
         let parts: Vec<&str> = id.split('-').collect();
         if parts.len() != 2 {
             return Err("ERR Id had the incorrect ammount of parts".to_owned());
         }
 
-        let milliseconds_time_result = str::parse::<u64>(parts[0]);
-        let sequence_number_result = str::parse::<u64>(parts[1]);
-        if milliseconds_time_result.is_err() || sequence_number_result.is_err() {
-            return Err("ERR Id parts were not numbers".to_owned());
-        }
-
-        let milliseconds_time = milliseconds_time_result.unwrap();
-        let sequence_number = sequence_number_result.unwrap();
-
-        if milliseconds_time == 0 && sequence_number == 0 {
-            return Err("ERR The ID specified in XADD must be greater than 0-0".to_owned());
-        }
-
-        if milliseconds_time < self.last_milliseconds_time
-            || (milliseconds_time == self.last_milliseconds_time
-                && sequence_number <= self.last_sequence_number)
-        {
+        let milliseconds_time = str::parse::<u64>(parts[0]).unwrap();
+        if milliseconds_time < self.last_milliseconds_time {
             return Err(
                 "ERR The ID specified in XADD is equal or smaller than the target stream top item"
                     .to_owned(),
             );
         }
 
+        let mut sequence_number = 0;
+        if parts[1] == "*" {
+            if milliseconds_time == self.last_milliseconds_time {
+                sequence_number = self.last_sequence_number + 1;
+            }
+        } else {
+            sequence_number = str::parse::<u64>(parts[1]).unwrap();
+
+            if milliseconds_time == self.last_milliseconds_time
+                && sequence_number <= self.last_sequence_number
+            {
+                return Err(
+                    "ERR The ID specified in XADD is equal or smaller than the target stream top item"
+                        .to_owned(),
+                );
+            }
+        }
+
         self.last_milliseconds_time = milliseconds_time;
         self.last_sequence_number = sequence_number;
         self.data.insert(id, value);
 
-        return Ok(());
+        return Ok(format!("{milliseconds_time}-{sequence_number}"));
     }
 }

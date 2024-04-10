@@ -89,7 +89,10 @@ mod commands {
                 resp_parser::encode_simple_error(&result.err().unwrap()),
             )
         } else {
-            utils::send(stream, resp_parser::encode_bulk_string(Some(id)));
+            utils::send(
+                stream,
+                resp_parser::encode_bulk_string(Some(&result.unwrap())),
+            );
         }
     }
 
