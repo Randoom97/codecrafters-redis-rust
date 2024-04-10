@@ -43,6 +43,7 @@ mod commands {
     };
 
     use crate::{
+        redis_stream::RedisStream,
         replication::{self, Replication},
         resp_parser,
         utils::{self, arg_parse},
@@ -62,7 +63,7 @@ mod commands {
             map.insert(
                 key.clone(),
                 Data {
-                    value: DataType::Stream(HashMap::new()),
+                    value: DataType::Stream(RedisStream::new()),
                     expire_time: None,
                 },
             );
@@ -79,10 +80,17 @@ mod commands {
             entry.insert(arguments[i].clone(), arguments[i + 1].clone());
         }
 
-        value.insert(id.clone(), entry);
+        let result = value.insert(id.clone(), entry);
         drop(map);
 
-        utils::send(stream, resp_parser::encode_bulk_string(Some(id)));
+        if result.is_err() {
+            utils::send(
+                stream,
+                resp_parser::encode_simple_error(&result.err().unwrap()),
+            )
+        } else {
+            utils::send(stream, resp_parser::encode_bulk_string(Some(id)));
+        }
     }
 
     pub fn value_type(

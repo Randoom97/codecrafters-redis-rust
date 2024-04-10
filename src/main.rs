@@ -2,6 +2,7 @@
 mod macros;
 mod client;
 mod rdb;
+mod redis_stream;
 mod replication;
 mod resp_parser;
 mod server;
@@ -16,6 +17,7 @@ use std::{
     time::SystemTime,
 };
 
+use redis_stream::RedisStream;
 use replication::Replication;
 use utils::arg_parse;
 
@@ -28,7 +30,7 @@ struct Data {
 #[derive(Debug)]
 pub enum DataType {
     String(String),
-    Stream(HashMap<String, HashMap<String, String>>),
+    Stream(RedisStream),
 }
 
 struct Server {
