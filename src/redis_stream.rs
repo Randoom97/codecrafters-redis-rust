@@ -82,9 +82,11 @@ impl RedisStream {
     pub fn query(&self, start: &String, end: &String) -> Vec<(&String, &Vec<(String, String)>)> {
         let mut keys: Vec<&String> = self.data.keys().collect();
         keys.retain(|key| {
-            match compare_ids(&key, &start) {
-                Ordering::Less => return false,
-                _ => {}
+            if start != "-" {
+                match compare_ids(&key, &start) {
+                    Ordering::Less => return false,
+                    _ => {}
+                }
             }
 
             match compare_ids(&key, &end) {
