@@ -1,10 +1,10 @@
-use std::{collections::HashMap, time::SystemTime};
+use std::{cmp::Ordering, collections::HashMap, time::SystemTime};
 
 #[derive(Debug)]
 pub struct RedisStream {
     last_milliseconds_time: u64,
     last_sequence_number: u64,
-    data: HashMap<String, HashMap<String, String>>,
+    data: HashMap<String, Vec<(String, String)>>,
 }
 
 impl RedisStream {
@@ -19,7 +19,7 @@ impl RedisStream {
     pub fn insert(
         &mut self,
         mut id: String,
-        value: HashMap<String, String>,
+        value: Vec<(String, String)>,
     ) -> Result<String, String> {
         if id == "0-0" {
             return Err("ERR The ID specified in XADD must be greater than 0-0".to_owned());
@@ -78,4 +78,55 @@ impl RedisStream {
 
         return Ok(id);
     }
+
+    pub fn query(&self, start: &String, end: &String) -> Vec<(&String, &Vec<(String, String)>)> {
+        let mut keys: Vec<&String> = self.data.keys().collect();
+        keys.retain(|key| {
+            match compare_ids(&key, &start) {
+                Ordering::Less => return false,
+                _ => {}
+            }
+
+            match compare_ids(&key, &end) {
+                Ordering::Greater => return false,
+                _ => {}
+            }
+
+            return true;
+        });
+        keys.sort_unstable_by(compare_ids);
+
+        let mut result: Vec<(&String, &Vec<(String, String)>)> = Vec::new();
+        for key in keys {
+            result.push((key, self.data.get(key).unwrap()));
+        }
+
+        return result;
+    }
+}
+
+fn compare_ids(a: &&String, b: &&String) -> Ordering {
+    let a_parts: Vec<&str> = a.split('-').collect();
+    let a_time = str::parse::<u64>(a_parts[0]).unwrap();
+    let a_sequence = a_parts.get(1).and_then(|part| str::parse::<u64>(part).ok());
+
+    let b_parts: Vec<&str> = b.split('-').collect();
+    let b_time = str::parse::<u64>(b_parts[0]).unwrap();
+    let b_sequence = b_parts.get(1).and_then(|part| str::parse::<u64>(part).ok());
+
+    if a_time < b_time {
+        return Ordering::Less;
+    } else if a_time > b_time {
+        return Ordering::Greater;
+    }
+
+    if a_sequence.is_some() && b_sequence.is_some() {
+        if a_sequence.unwrap() < b_sequence.unwrap() {
+            return Ordering::Less;
+        } else if a_sequence.unwrap() > b_sequence.unwrap() {
+            return Ordering::Greater;
+        }
+    }
+
+    return Ordering::Equal;
 }

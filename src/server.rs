@@ -45,10 +45,48 @@ mod commands {
     use crate::{
         redis_stream::RedisStream,
         replication::{self, Replication},
-        resp_parser,
+        resp_parser::{self, RedisType},
         utils::{self, arg_parse},
         Data, DataType, Server,
     };
+
+    pub fn xrange(
+        stream: &mut impl Write,
+        arguments: &Vec<String>,
+        data_store: &Arc<RwLock<HashMap<String, Data>>>,
+    ) {
+        let key = &arguments[1];
+        let start = &arguments[2];
+        let end = &arguments[3];
+
+        let mut result: Vec<RedisType> = Vec::new();
+        let map = data_store.read().unwrap();
+        if map.contains_key(key) {
+            let value = match &map.get(key).unwrap().value {
+                DataType::Stream(value) => Some(value),
+                _ => None,
+            }
+            .unwrap();
+
+            let entries = value.query(start, end);
+            for (id, entry) in entries {
+                let mut entry_vec: Vec<RedisType> = Vec::new();
+                entry_vec.push(RedisType::BulkString(Some(id.clone())));
+
+                let mut fields_vec: Vec<RedisType> = Vec::new();
+                for (key, value) in entry {
+                    fields_vec.push(RedisType::BulkString(Some(key.clone())));
+                    fields_vec.push(RedisType::BulkString(Some(value.clone())));
+                }
+                entry_vec.push(RedisType::Array(fields_vec));
+
+                result.push(RedisType::Array(entry_vec));
+            }
+        }
+        drop(map);
+
+        utils::send(stream, resp_parser::encode(&RedisType::Array(result)));
+    }
 
     pub fn xadd(
         stream: &mut impl Write,
@@ -75,9 +113,10 @@ mod commands {
         }
         .unwrap();
 
-        let mut entry = HashMap::new();
-        for i in (3..((arguments.len() / 2) * 2) - 1).step_by(2) {
-            entry.insert(arguments[i].clone(), arguments[i + 1].clone());
+        let mut entry = Vec::new();
+        let fields = &arguments[3..];
+        for i in (0..((fields.len() / 2) * 2) - 1).step_by(2) {
+            entry.push((fields[i].clone(), fields[i + 1].clone()));
         }
 
         let result = value.insert(id.clone(), entry);
@@ -419,6 +458,7 @@ pub fn stream_handler(
         let (arguments, _) = arguments_option.unwrap();
 
         match arguments[0].to_ascii_lowercase().as_str() {
+            "xrange" => commands::xrange(&mut stream, &arguments, &data_store),
             "xadd" => commands::xadd(&mut stream, &arguments, &data_store),
             "type" => commands::value_type(&mut stream, &arguments, &data_store), // can't be 'type' because rust
             "keys" => commands::keys(&mut stream, &data_store),
