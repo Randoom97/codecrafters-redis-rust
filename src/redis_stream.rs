@@ -89,9 +89,11 @@ impl RedisStream {
                 }
             }
 
-            match compare_ids(&key, &end) {
-                Ordering::Greater => return false,
-                _ => {}
+            if end != "+" {
+                match compare_ids(&key, &end) {
+                    Ordering::Greater => return false,
+                    _ => {}
+                }
             }
 
             return true;
