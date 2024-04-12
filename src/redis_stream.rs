@@ -16,6 +16,12 @@ impl RedisStream {
         };
     }
 
+    pub fn last_id(&self) -> String {
+        let time = self.last_milliseconds_time;
+        let sequence = self.last_sequence_number;
+        return format!("{time}-{sequence}");
+    }
+
     pub fn insert(
         &mut self,
         mut id: String,

@@ -80,14 +80,32 @@ mod commands {
         let block_time = arg_parse::get_u64("block", arguments);
         let streams_index = arguments.iter().position(|a| a == "streams").unwrap();
         let keys_and_ids = &arguments[streams_index + 1..];
-        let keys = &keys_and_ids[..keys_and_ids.len() / 2];
-        let ids = &keys_and_ids[keys.len()..];
+        let keys = Vec::from(&keys_and_ids[..keys_and_ids.len() / 2]);
+        let mut ids = Vec::from(&keys_and_ids[keys.len()..]);
+
+        if ids.iter().find(|id| *id == "$").is_some() {
+            let map = data_store.read().unwrap();
+            for (i, key) in keys.iter().enumerate() {
+                if ids[i] != "$" {
+                    continue;
+                }
+                if map.contains_key(key) {
+                    let value = match &map.get(key).unwrap().value {
+                        DataType::Stream(value) => Some(value),
+                        _ => None,
+                    }
+                    .unwrap();
+                    ids[i] = value.last_id();
+                }
+            }
+            drop(map);
+        }
 
         if block_time.is_some() {
             if block_time.unwrap() == 0 {
                 let mut xread_subscriptions = server_info.xread_subscriptions.write().unwrap();
                 let mut wakeup_keys = HashSet::new();
-                for key in keys {
+                for key in &keys {
                     wakeup_keys.insert(key.clone());
                 }
                 let (send, recv) = mpsc::channel::<()>();
