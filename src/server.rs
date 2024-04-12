@@ -31,6 +31,24 @@ fn parse_arguments(stream: &mut impl Read) -> Option<(Vec<String>, u64)> {
     ));
 }
 
+fn convert_entries_to_vec(entries: Vec<(&String, &Vec<(String, String)>)>) -> Vec<RedisType> {
+    let mut result = Vec::new();
+    for (id, entry) in entries {
+        let mut entry_vec: Vec<RedisType> = Vec::new();
+        entry_vec.push(RedisType::BulkString(Some(id.clone())));
+
+        let mut fields_vec: Vec<RedisType> = Vec::new();
+        for (key, value) in entry {
+            fields_vec.push(RedisType::BulkString(Some(key.clone())));
+            fields_vec.push(RedisType::BulkString(Some(value.clone())));
+        }
+        entry_vec.push(RedisType::Array(fields_vec));
+
+        result.push(RedisType::Array(entry_vec));
+    }
+    return result;
+}
+
 mod commands {
     use std::{
         collections::HashMap,
@@ -50,6 +68,39 @@ mod commands {
         Data, DataType, Server,
     };
 
+    use super::convert_entries_to_vec;
+
+    pub fn xread(
+        stream: &mut impl Write,
+        arguments: &Vec<String>,
+        data_store: &Arc<RwLock<HashMap<String, Data>>>,
+    ) {
+        let keys_and_ids = &arguments[2..];
+        let keys = &keys_and_ids[..keys_and_ids.len() / 2];
+        let ids = &keys_and_ids[keys.len()..];
+
+        let mut result: Vec<RedisType> = Vec::new();
+        let map = data_store.read().unwrap();
+        for (i, key) in keys.iter().enumerate() {
+            if map.contains_key(key) {
+                let mut stream_result = Vec::new();
+                let value = match &map.get(key).unwrap().value {
+                    DataType::Stream(value) => Some(value),
+                    _ => None,
+                }
+                .unwrap();
+                let entries =
+                    convert_entries_to_vec(value.query_exclusive(&ids[i], &"+".to_owned()));
+                stream_result.push(RedisType::BulkString(Some(key.clone())));
+                stream_result.push(RedisType::Array(entries));
+                result.push(RedisType::Array(stream_result));
+            }
+        }
+        drop(map);
+
+        utils::send(stream, resp_parser::encode(&RedisType::Array(result)));
+    }
+
     pub fn xrange(
         stream: &mut impl Write,
         arguments: &Vec<String>,
@@ -67,21 +118,7 @@ mod commands {
                 _ => None,
             }
             .unwrap();
-
-            let entries = value.query(start, end);
-            for (id, entry) in entries {
-                let mut entry_vec: Vec<RedisType> = Vec::new();
-                entry_vec.push(RedisType::BulkString(Some(id.clone())));
-
-                let mut fields_vec: Vec<RedisType> = Vec::new();
-                for (key, value) in entry {
-                    fields_vec.push(RedisType::BulkString(Some(key.clone())));
-                    fields_vec.push(RedisType::BulkString(Some(value.clone())));
-                }
-                entry_vec.push(RedisType::Array(fields_vec));
-
-                result.push(RedisType::Array(entry_vec));
-            }
+            result = convert_entries_to_vec(value.query_inclusive(start, end));
         }
         drop(map);
 
@@ -458,6 +495,7 @@ pub fn stream_handler(
         let (arguments, _) = arguments_option.unwrap();
 
         match arguments[0].to_ascii_lowercase().as_str() {
+            "xread" => commands::xread(&mut stream, &arguments, &data_store),
             "xrange" => commands::xrange(&mut stream, &arguments, &data_store),
             "xadd" => commands::xadd(&mut stream, &arguments, &data_store),
             "type" => commands::value_type(&mut stream, &arguments, &data_store), // can't be 'type' because rust

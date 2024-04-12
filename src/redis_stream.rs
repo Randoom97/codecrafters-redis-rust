@@ -79,7 +79,44 @@ impl RedisStream {
         return Ok(id);
     }
 
-    pub fn query(&self, start: &String, end: &String) -> Vec<(&String, &Vec<(String, String)>)> {
+    pub fn query_exclusive(
+        &self,
+        start: &String,
+        end: &String,
+    ) -> Vec<(&String, &Vec<(String, String)>)> {
+        let mut keys: Vec<&String> = self.data.keys().collect();
+        keys.retain(|key| {
+            if start != "-" {
+                match compare_ids(&key, &start) {
+                    Ordering::Greater => {}
+                    _ => return false,
+                }
+            }
+
+            if end != "+" {
+                match compare_ids(&key, &end) {
+                    Ordering::Less => {}
+                    _ => return false,
+                }
+            }
+
+            return true;
+        });
+        keys.sort_unstable_by(compare_ids);
+
+        let mut result: Vec<(&String, &Vec<(String, String)>)> = Vec::new();
+        for key in keys {
+            result.push((key, self.data.get(key).unwrap()));
+        }
+
+        return result;
+    }
+
+    pub fn query_inclusive(
+        &self,
+        start: &String,
+        end: &String,
+    ) -> Vec<(&String, &Vec<(String, String)>)> {
         let mut keys: Vec<&String> = self.data.keys().collect();
         keys.retain(|key| {
             if start != "-" {
