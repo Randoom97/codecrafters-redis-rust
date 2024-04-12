@@ -75,9 +75,15 @@ mod commands {
         arguments: &Vec<String>,
         data_store: &Arc<RwLock<HashMap<String, Data>>>,
     ) {
-        let keys_and_ids = &arguments[2..];
+        let block_time = arg_parse::get_u64("block", arguments).unwrap_or(0);
+        let streams_index = arguments.iter().position(|a| a == "streams").unwrap();
+        let keys_and_ids = &arguments[streams_index + 1..];
         let keys = &keys_and_ids[..keys_and_ids.len() / 2];
         let ids = &keys_and_ids[keys.len()..];
+
+        if block_time > 0 {
+            thread::sleep(Duration::from_millis(block_time));
+        }
 
         let mut result: Vec<RedisType> = Vec::new();
         let map = data_store.read().unwrap();
@@ -91,14 +97,20 @@ mod commands {
                 .unwrap();
                 let entries =
                     convert_entries_to_vec(value.query_exclusive(&ids[i], &"+".to_owned()));
-                stream_result.push(RedisType::BulkString(Some(key.clone())));
-                stream_result.push(RedisType::Array(entries));
-                result.push(RedisType::Array(stream_result));
+                if !entries.is_empty() {
+                    stream_result.push(RedisType::BulkString(Some(key.clone())));
+                    stream_result.push(RedisType::Array(entries));
+                    result.push(RedisType::Array(stream_result));
+                }
             }
         }
         drop(map);
 
-        utils::send(stream, resp_parser::encode(&RedisType::Array(result)));
+        if result.is_empty() {
+            utils::send(stream, resp_parser::encode_bulk_string(None));
+        } else {
+            utils::send(stream, resp_parser::encode(&RedisType::Array(result)));
+        }
     }
 
     pub fn xrange(
