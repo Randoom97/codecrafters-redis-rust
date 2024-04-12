@@ -7,6 +7,7 @@ mod replication;
 mod resp_parser;
 mod server;
 mod utils;
+mod xread_subscription;
 
 use std::{
     collections::HashMap,
@@ -20,6 +21,7 @@ use std::{
 use redis_stream::RedisStream;
 use replication::Replication;
 use utils::arg_parse;
+use xread_subscription::XreadSubscription;
 
 #[derive(Debug)]
 struct Data {
@@ -41,6 +43,7 @@ struct Server {
     connected_replications: RwLock<Vec<Replication>>,
     dir: String,
     dbfilename: String,
+    xread_subscriptions: RwLock<Vec<XreadSubscription>>,
 }
 
 fn main() {
@@ -81,6 +84,7 @@ fn main() {
         connected_replications: RwLock::new(Vec::new()),
         dir: dir.unwrap_or(&".".to_string()).to_owned(),
         dbfilename: dbfilename.unwrap_or(&"empty.rdb".to_string()).to_owned(),
+        xread_subscriptions: RwLock::new(Vec::new()),
     });
 
     rdb::load_rdb(

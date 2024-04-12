@@ -51,11 +51,11 @@ fn convert_entries_to_vec(entries: Vec<(&String, &Vec<(String, String)>)>) -> Ve
 
 mod commands {
     use std::{
-        collections::HashMap,
+        collections::{HashMap, HashSet},
         fs::File,
         io::Write,
         net::TcpStream,
-        sync::{Arc, RwLock},
+        sync::{mpsc, Arc, RwLock},
         thread,
         time::{Duration, SystemTime},
     };
@@ -65,6 +65,7 @@ mod commands {
         replication::{self, Replication},
         resp_parser::{self, RedisType},
         utils::{self, arg_parse},
+        xread_subscription::{self, XreadSubscription},
         Data, DataType, Server,
     };
 
@@ -73,16 +74,30 @@ mod commands {
     pub fn xread(
         stream: &mut impl Write,
         arguments: &Vec<String>,
+        server_info: &Arc<Server>,
         data_store: &Arc<RwLock<HashMap<String, Data>>>,
     ) {
-        let block_time = arg_parse::get_u64("block", arguments).unwrap_or(0);
+        let block_time = arg_parse::get_u64("block", arguments);
         let streams_index = arguments.iter().position(|a| a == "streams").unwrap();
         let keys_and_ids = &arguments[streams_index + 1..];
         let keys = &keys_and_ids[..keys_and_ids.len() / 2];
         let ids = &keys_and_ids[keys.len()..];
 
-        if block_time > 0 {
-            thread::sleep(Duration::from_millis(block_time));
+        if block_time.is_some() {
+            if block_time.unwrap() == 0 {
+                let mut xread_subscriptions = server_info.xread_subscriptions.write().unwrap();
+                let mut wakeup_keys = HashSet::new();
+                for key in keys {
+                    wakeup_keys.insert(key.clone());
+                }
+                let (send, recv) = mpsc::channel::<()>();
+                xread_subscriptions.push(XreadSubscription::new(wakeup_keys, send));
+                drop(xread_subscriptions);
+
+                recv.recv().unwrap(); // block until woken up
+            } else {
+                thread::sleep(Duration::from_millis(block_time.unwrap()));
+            }
         }
 
         let mut result: Vec<RedisType> = Vec::new();
@@ -140,6 +155,7 @@ mod commands {
     pub fn xadd(
         stream: &mut impl Write,
         arguments: &Vec<String>,
+        server_info: &Arc<Server>,
         data_store: &Arc<RwLock<HashMap<String, Data>>>,
     ) {
         let key = &arguments[1];
@@ -181,6 +197,7 @@ mod commands {
                 stream,
                 resp_parser::encode_bulk_string(Some(&result.unwrap())),
             );
+            xread_subscription::wakeup_subscribers(server_info, key);
         }
     }
 
@@ -507,9 +524,9 @@ pub fn stream_handler(
         let (arguments, _) = arguments_option.unwrap();
 
         match arguments[0].to_ascii_lowercase().as_str() {
-            "xread" => commands::xread(&mut stream, &arguments, &data_store),
+            "xread" => commands::xread(&mut stream, &arguments, &server_info, &data_store),
             "xrange" => commands::xrange(&mut stream, &arguments, &data_store),
-            "xadd" => commands::xadd(&mut stream, &arguments, &data_store),
+            "xadd" => commands::xadd(&mut stream, &arguments, &server_info, &data_store),
             "type" => commands::value_type(&mut stream, &arguments, &data_store), // can't be 'type' because rust
             "keys" => commands::keys(&mut stream, &data_store),
             "config" => commands::config(&mut stream, &arguments, &server_info),
