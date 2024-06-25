@@ -6,6 +6,7 @@ use std::{
     str::from_utf8,
 };
 
+use crate::macros::{option_get_or_return_none, result_get_or_return_none};
 use crate::utils::byte_stream;
 
 // #[derive(Eq, Hash, PartialEq)]

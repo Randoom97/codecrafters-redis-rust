@@ -1,8 +1,9 @@
 use std::{io::Read, net::TcpStream};
 
+use super::utils::{convert_to_redis_bulk_string_array, send};
 use crate::{
-    resp_parser::{self, RedisType},
-    utils,
+    macros::option_type_guard,
+    utils::resp_parser::{self, RedisType},
 };
 
 fn expect_response(host_stream: &mut impl Read, expected_response: &str) -> bool {
@@ -24,17 +25,17 @@ pub fn replicate_server(
     }
     let mut host_stream = host_stream_result.unwrap();
 
-    utils::send(
+    send(
         &mut host_stream,
-        resp_parser::encode(&utils::convert_to_redis_bulk_string_array(vec!["ping"])),
+        resp_parser::encode(&convert_to_redis_bulk_string_array(vec!["ping"])),
     );
     if !expect_response(&mut host_stream, "pong") {
         return Err("master did not respond to ping".to_owned());
     }
 
-    utils::send(
+    send(
         &mut host_stream,
-        resp_parser::encode(&utils::convert_to_redis_bulk_string_array(vec![
+        resp_parser::encode(&convert_to_redis_bulk_string_array(vec![
             "REPLCONF",
             "listening-port",
             &server_port.to_string(),
@@ -44,9 +45,9 @@ pub fn replicate_server(
         return Err("master didn't respond ok to first REPLCONF".to_owned());
     }
 
-    utils::send(
+    send(
         &mut host_stream,
-        resp_parser::encode(&utils::convert_to_redis_bulk_string_array(vec![
+        resp_parser::encode(&convert_to_redis_bulk_string_array(vec![
             "REPLCONF", "capa", "psync2",
         ])),
     );
@@ -54,9 +55,9 @@ pub fn replicate_server(
         return Err("master did't respond ok to second REPLCONF".to_owned());
     }
 
-    utils::send(
+    send(
         &mut host_stream,
-        resp_parser::encode(&utils::convert_to_redis_bulk_string_array(vec![
+        resp_parser::encode(&convert_to_redis_bulk_string_array(vec![
             "PSYNC", "?", "-1",
         ])),
     );

@@ -7,7 +7,8 @@ use std::{
 };
 
 use crate::{
-    resp_parser::{self, RedisType},
+    macros::option_type_guard,
+    utils::resp_parser::{self, RedisType},
     Server,
 };
 
@@ -17,21 +18,9 @@ pub struct Replication {
     pub(crate) master_repl_offset: RwLock<u64>,
 }
 
-pub fn queue_send_to_replications(server_info: &Arc<Server>, command_string: String) {
-    let mut master_repl_offset = server_info.master_repl_offset.write().unwrap();
-    *master_repl_offset += command_string.as_bytes().len() as u64;
-    drop(master_repl_offset);
-
-    let replication_vec = server_info.connected_replications.read().unwrap();
-    for replication in replication_vec.iter() {
-        let mut send_buffer = replication.send_buffer.write().unwrap();
-        send_buffer.push(command_string.clone());
-    }
-}
-
-pub fn replication_loop(server_info: Arc<Server>) {
+pub fn replication_loop(server: Arc<Server>) {
     loop {
-        let mut replication_vec = server_info.connected_replications.write().unwrap();
+        let mut replication_vec = server.connected_replications.write().unwrap();
         let mut drop_indicies: Vec<usize> = Vec::new();
         for i in 0..replication_vec.len() {
             let replication = &mut replication_vec[i];

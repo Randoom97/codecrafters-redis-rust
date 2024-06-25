@@ -7,6 +7,7 @@ macro_rules! option_get_or_return_none {
         let $variable = variable_option.unwrap();
     };
 }
+pub(crate) use option_get_or_return_none;
 
 macro_rules! result_get_or_return_none {
     ($variable:ident, $result_method:expr) => {
@@ -17,6 +18,7 @@ macro_rules! result_get_or_return_none {
         let $variable = variable_result.unwrap();
     };
 }
+pub(crate) use result_get_or_return_none;
 
 macro_rules! option_type_guard {
     ($variable_option:ident, $match:expr, $type_to_check:path) => {
@@ -26,3 +28,4 @@ macro_rules! option_type_guard {
         };
     };
 }
+pub(crate) use option_type_guard;

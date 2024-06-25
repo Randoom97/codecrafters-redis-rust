@@ -1,13 +1,14 @@
 use std::{
-    collections::HashMap,
     fs::File,
     io::Read,
     str::from_utf8,
-    sync::{Arc, RwLock},
     time::{Duration, SystemTime},
 };
 
-use crate::{utils::byte_stream, Data, DataType};
+use crate::{
+    structs::data_store::{DataStore, DataType},
+    utils::byte_stream,
+};
 
 fn read_length(stream: &mut impl Read) -> (u32, bool) {
     let first_byte = byte_stream::read_byte(stream).unwrap();
@@ -82,7 +83,7 @@ fn read_key_value_pair(
     }
 }
 
-pub fn load_rdb(filepath: String, data_store: &Arc<RwLock<HashMap<String, Data>>>) {
+pub fn load_rdb(filepath: &String, data_store: &DataStore) {
     let file_result = File::open(filepath);
     if file_result.is_err() {
         return;
@@ -110,17 +111,11 @@ pub fn load_rdb(filepath: String, data_store: &Arc<RwLock<HashMap<String, Data>>
                 }
                 let (key, value) = read_key_value_pair(&mut file, None).unwrap();
 
-                let mut map = data_store.write().unwrap();
-                map.insert(
-                    key,
-                    Data {
-                        value: DataType::String(value),
-                        expire_time: Some(
-                            SystemTime::UNIX_EPOCH + Duration::from_secs(expire_time_s as u64),
-                        ),
-                    },
+                data_store.insert(
+                    &key,
+                    DataType::String(value),
+                    Some(SystemTime::UNIX_EPOCH + Duration::from_secs(expire_time_s as u64)),
                 );
-                drop(map);
             }
             // EXPIRETIMEMS
             0xfc => {
@@ -131,26 +126,17 @@ pub fn load_rdb(filepath: String, data_store: &Arc<RwLock<HashMap<String, Data>>
                 }
                 let (key, value) = read_key_value_pair(&mut file, None).unwrap();
 
-                let mut map = data_store.write().unwrap();
-                map.insert(
-                    key,
-                    Data {
-                        value: DataType::String(value),
-                        expire_time: Some(
-                            SystemTime::UNIX_EPOCH + Duration::from_millis(expire_time_ms),
-                        ),
-                    },
+                data_store.insert(
+                    &key,
+                    DataType::String(value),
+                    Some(SystemTime::UNIX_EPOCH + Duration::from_millis(expire_time_ms)),
                 );
-                drop(map);
             }
             // RESIZEDB
             0xfb => {
                 let (map_size, _) = read_length(&mut file);
                 read_length(&mut file); // expire size
-
-                let mut map = data_store.write().unwrap();
-                map.reserve(map_size as usize);
-                drop(map);
+                data_store.reserve(map_size as usize);
             }
             // AUX
             0xfa => {
@@ -160,15 +146,7 @@ pub fn load_rdb(filepath: String, data_store: &Arc<RwLock<HashMap<String, Data>>
             // key value pair
             _ => {
                 let (key, value) = read_key_value_pair(&mut file, Some(opcode)).unwrap();
-                let mut map = data_store.write().unwrap();
-                map.insert(
-                    key,
-                    Data {
-                        value: DataType::String(value),
-                        expire_time: None,
-                    },
-                );
-                drop(map);
+                data_store.insert(&key, DataType::String(value), None);
             }
         }
     }

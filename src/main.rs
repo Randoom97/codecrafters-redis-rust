@@ -1,50 +1,19 @@
 #[macro_use]
+mod handlers;
 mod macros;
-mod client;
-mod rdb;
-mod redis_stream;
-mod replication;
-mod resp_parser;
-mod server;
+mod structs;
 mod utils;
-mod xread_subscription;
 
 use std::{
-    collections::HashMap,
     env,
     net::{TcpListener, TcpStream},
-    sync::{Arc, RwLock},
+    sync::Arc,
     thread,
-    time::SystemTime,
 };
 
-use redis_stream::RedisStream;
-use replication::Replication;
+use handlers::{client_handler, replication_handler, server_handler};
+use structs::server::Server;
 use utils::arg_parse;
-use xread_subscription::XreadSubscription;
-
-#[derive(Debug)]
-struct Data {
-    value: DataType,
-    expire_time: Option<SystemTime>,
-}
-
-#[derive(Debug)]
-pub enum DataType {
-    String(String),
-    Stream(RedisStream),
-}
-
-struct Server {
-    role: String,
-    replid: String,
-    master_replid: String,
-    master_repl_offset: RwLock<u64>,
-    connected_replications: RwLock<Vec<Replication>>,
-    dir: String,
-    dbfilename: String,
-    xread_subscriptions: RwLock<Vec<XreadSubscription>>,
-}
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -58,7 +27,7 @@ fn main() {
     let mut host_stream: Option<TcpStream> = None;
     if replica_args_option.is_some() {
         let replica_args = replica_args_option.as_ref().unwrap();
-        let result = client::replicate_server(replica_args, port);
+        let result = client_handler::replicate_server(replica_args, port);
         if result.is_err() {
             println!("{}", result.err().unwrap());
             return;
@@ -69,39 +38,23 @@ fn main() {
         host_stream = Some(master_info.2);
     }
 
-    let mut data_store: Arc<RwLock<HashMap<String, Data>>> = Arc::new(RwLock::new(HashMap::new()));
-    let server_info = Arc::new(Server {
-        role: (if replica_args_option.is_none() {
-            "master"
-        } else {
-            "slave"
-        })
-        .to_owned(),
-        replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_owned(), // TODO don't hardcode replid
-        master_replid: master_replid
-            .unwrap_or("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_owned()),
-        master_repl_offset: RwLock::new(master_repl_offset.unwrap_or(0)),
-        connected_replications: RwLock::new(Vec::new()),
-        dir: dir.unwrap_or(&".".to_string()).to_owned(),
-        dbfilename: dbfilename.unwrap_or(&"empty.rdb".to_string()).to_owned(),
-        xread_subscriptions: RwLock::new(Vec::new()),
-    });
-
-    rdb::load_rdb(
-        server_info.dir.clone() + "/" + &server_info.dbfilename,
-        &data_store,
-    );
+    let server = Arc::new(Server::new(
+        replica_args_option,
+        master_replid,
+        master_repl_offset,
+        dir,
+        dbfilename,
+    ));
 
     if host_stream.is_some() {
-        let data_store = Arc::clone(&mut data_store);
-        let server_info = Arc::clone(&server_info);
+        let server = Arc::clone(&server);
         thread::spawn(move || {
-            server::replication_stream_handler(host_stream.unwrap(), data_store, server_info)
+            server_handler::replication_stream_handler(host_stream.unwrap(), server)
         });
     } else {
-        let server_info = Arc::clone(&server_info);
+        let server = Arc::clone(&server);
         thread::spawn(move || {
-            replication::replication_loop(server_info);
+            replication_handler::replication_loop(server);
         });
     }
 
@@ -110,9 +63,8 @@ fn main() {
     for stream_result in listener.incoming() {
         match stream_result {
             Ok(stream) => {
-                let data_store = Arc::clone(&mut data_store);
-                let server_info = Arc::clone(&server_info);
-                thread::spawn(move || server::stream_handler(stream, data_store, server_info));
+                let server = Arc::clone(&server);
+                thread::spawn(move || server_handler::stream_handler(stream, server));
             }
             Err(e) => {
                 println!("error: {}", e);

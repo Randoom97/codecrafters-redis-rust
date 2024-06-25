@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, collections::HashMap, time::SystemTime};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RedisStream {
     last_milliseconds_time: u64,
     last_sequence_number: u64,
