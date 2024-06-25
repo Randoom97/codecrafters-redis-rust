@@ -24,6 +24,42 @@ use crate::{
     Server,
 };
 
+pub fn incr(
+    stream: &mut impl Write,
+    arguments: &Vec<String>,
+    server: &Arc<Server>,
+    is_replication_connection: bool,
+) {
+    let key = &arguments[1];
+
+    let mut replication_lock: Option<MutexGuard<()>> = None;
+    if !is_replication_connection {
+        replication_lock = Some(server.master_repl_mutex.lock().unwrap());
+    }
+
+    let result = server.data_store.increment(key);
+
+    // this needs to be inside a lock to guarantee replicas receive commands in the right order
+    if !is_replication_connection {
+        let arguments_as_str = arguments.iter().map(|s| s.as_str()).collect();
+        let command = resp_parser::encode(&convert_to_redis_bulk_string_array(arguments_as_str));
+        server.queue_send_to_replications(command.clone());
+    }
+
+    drop(replication_lock);
+
+    if !is_replication_connection {
+        if result.is_err() {
+            send(
+                stream,
+                resp_parser::encode_simple_error("ERR value is not an integer or out of range"),
+            );
+        } else {
+            send(stream, resp_parser::encode_integer(result.unwrap()));
+        }
+    }
+}
+
 pub fn xread(stream: &mut impl Write, arguments: &Vec<String>, server: &Arc<Server>) {
     let block_time = arg_parse::get_u64("block", arguments);
     let streams_index = arguments.iter().position(|a| a == "streams").unwrap();

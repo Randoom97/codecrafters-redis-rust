@@ -171,6 +171,24 @@ impl DataStore {
         drop(maps);
         return result;
     }
+
+    pub fn increment(&self, key: &String) -> Result<i64, ()> {
+        let string_value = match self.get(key) {
+            Some(DataType::String(value)) => Ok(value),
+            None => Ok("0".to_owned()),
+            _ => Err(()),
+        }?;
+
+        let integer_value_result = str::parse::<i64>(&string_value);
+        if integer_value_result.is_err() {
+            return Err(());
+        }
+
+        let integer_value = integer_value_result.unwrap() + 1;
+
+        self.insert(key, DataType::String(format!("{}", integer_value)), None);
+        return Ok(integer_value);
+    }
 }
 
 fn convert_entries_to_vec(entries: Vec<(&String, &Vec<(String, String)>)>) -> Vec<RedisType> {

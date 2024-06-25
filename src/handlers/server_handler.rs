@@ -37,6 +37,7 @@ pub fn replication_stream_handler(mut stream: TcpStream, server: Arc<Server>) {
         let (arguments, bytes_read) = arguments_option.unwrap();
 
         match arguments[0].to_ascii_lowercase().as_str() {
+            "incr" => commands::incr(&mut stream, &arguments, &server, true),
             "replconf" => commands::replconf(&mut stream, &arguments, &server),
             "set" => commands::set(&mut stream, &arguments, &server, true),
             _ => {}
@@ -57,6 +58,7 @@ pub fn stream_handler(mut stream: TcpStream, server: Arc<Server>) {
         let (arguments, _) = arguments_option.unwrap();
 
         match arguments[0].to_ascii_lowercase().as_str() {
+            "incr" => commands::incr(&mut stream, &arguments, &server, false),
             "xread" => commands::xread(&mut stream, &arguments, &server),
             "xrange" => commands::xrange(&mut stream, &arguments, &server),
             "xadd" => commands::xadd(&mut stream, &arguments, &server),
