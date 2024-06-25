@@ -14,11 +14,11 @@ fn expect_response(host_stream: &mut impl Read, expected_response: &str) -> bool
 }
 
 pub fn replicate_server(
-    replica_args: &Vec<&String>,
+    replica_args: &Vec<String>,
     server_port: u64,
 ) -> Result<(String, u64, TcpStream), String> {
-    let master_host = replica_args[0];
-    let master_port = replica_args[1];
+    let master_host = &replica_args[0];
+    let master_port = &replica_args[1];
     let host_stream_result = TcpStream::connect(master_host.to_owned() + ":" + master_port);
     if host_stream_result.is_err() {
         return Err("couldn't connect to master".to_owned());

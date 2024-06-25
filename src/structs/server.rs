@@ -20,7 +20,7 @@ pub struct Server {
 
 impl Server {
     pub fn new(
-        role: Option<Vec<&String>>,
+        role: Option<&String>,
         master_replid: Option<String>,
         master_repl_offset: Option<u64>,
         dir: Option<&String>,

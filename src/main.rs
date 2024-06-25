@@ -18,7 +18,7 @@ use utils::arg_parse;
 fn main() {
     let args: Vec<String> = env::args().collect();
     let port = arg_parse::get_u64("--port", &args).unwrap_or(6379);
-    let replica_args_option = arg_parse::get_n_strings("--replicaof", &args, 2);
+    let replica_args_option = arg_parse::get_string("--replicaof", &args);
     let dir = arg_parse::get_string("--dir", &args);
     let dbfilename = arg_parse::get_string("--dbfilename", &args);
 
@@ -27,7 +27,10 @@ fn main() {
     let mut host_stream: Option<TcpStream> = None;
     if replica_args_option.is_some() {
         let replica_args = replica_args_option.as_ref().unwrap();
-        let result = client_handler::replicate_server(replica_args, port);
+        let result = client_handler::replicate_server(
+            &replica_args.split(' ').map(|s| s.to_owned()).collect(),
+            port,
+        );
         if result.is_err() {
             println!("{}", result.err().unwrap());
             return;
