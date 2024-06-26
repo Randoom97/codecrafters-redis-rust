@@ -102,6 +102,19 @@ pub fn stream_handler(mut stream: TcpStream, server: Arc<Server>) {
 
         // special commands
         match arguments[0].to_ascii_lowercase().as_str() {
+            "discard" => {
+                if multi_in_process {
+                    multi_in_process = false;
+                    multi_queue.clear();
+                    send(&mut stream, resp_parser::encode_simple_string("OK"));
+                } else {
+                    send(
+                        &mut stream,
+                        resp_parser::encode_simple_error("ERR DISCARD without MULTI"),
+                    );
+                }
+                continue;
+            }
             "exec" => {
                 if multi_in_process {
                     let responses = multi_queue
