@@ -50,6 +50,8 @@ pub fn replication_stream_handler(mut stream: TcpStream, server: Arc<Server>) {
 }
 
 pub fn stream_handler(mut stream: TcpStream, server: Arc<Server>) {
+    let mut multi_in_process = false;
+    let mut multi_queue: Vec<Vec<String>> = Vec::new();
     loop {
         let arguments_option = parse_arguments(&mut stream);
         if arguments_option.is_none() {
@@ -57,7 +59,17 @@ pub fn stream_handler(mut stream: TcpStream, server: Arc<Server>) {
         }
         let (arguments, _) = arguments_option.unwrap();
 
+        if multi_in_process {
+            multi_queue.push(arguments);
+            send(&mut stream, resp_parser::encode_simple_string("QUEUED"));
+            continue;
+        }
+
         match arguments[0].to_ascii_lowercase().as_str() {
+            "multi" => {
+                multi_in_process = true;
+                send(&mut stream, resp_parser::encode_simple_string("OK"));
+            }
             "incr" => commands::incr(&mut stream, &arguments, &server, false),
             "xread" => commands::xread(&mut stream, &arguments, &server),
             "xrange" => commands::xrange(&mut stream, &arguments, &server),
