@@ -1,8 +1,12 @@
 use std::sync::{Mutex, RwLock};
 
 use crate::{
-    handlers::replication_handler::Replication, structs::data_store::DataStore,
-    structs::xread_subscription::XreadSubscription, utils::rdb,
+    handlers::replication_handler::Replication,
+    structs::{data_store::DataStore, xread_subscription::XreadSubscription},
+    utils::{
+        rdb,
+        resp_parser::{self, RedisType},
+    },
 };
 
 pub struct Server {
@@ -45,7 +49,8 @@ impl Server {
         return server;
     }
 
-    pub fn queue_send_to_replications(&self, command_string: String) {
+    pub fn queue_send_to_replications(&self, command: RedisType) {
+        let command_string = resp_parser::encode(&command);
         let mut master_repl_offset = self.master_repl_offset.write().unwrap();
         *master_repl_offset += command_string.as_bytes().len() as u64;
         drop(master_repl_offset);
