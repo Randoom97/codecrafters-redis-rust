@@ -100,38 +100,66 @@ pub fn stream_handler(mut stream: TcpStream, server: Arc<Server>) {
         }
         let (arguments, _) = arguments_option.unwrap();
 
+        // special commands
+        match arguments[0].to_ascii_lowercase().as_str() {
+            "exec" => {
+                if multi_in_process {
+                    let responses = multi_queue
+                        .iter()
+                        .map(|arguments| handle_command(&arguments, &server))
+                        .collect();
+                    send(&mut stream, resp_parser::encode_array(&responses));
+                    multi_in_process = false;
+                    multi_queue.clear();
+                } else {
+                    send(
+                        &mut stream,
+                        resp_parser::encode_simple_error("ERR EXEC without MULTI"),
+                    )
+                }
+                continue;
+            }
+            "multi" => {
+                multi_in_process = true;
+                send(&mut stream, resp_parser::encode_simple_string("OK"));
+                continue;
+            }
+            "psync" => {
+                psync(stream, &server);
+                return; // This connection is now a replication connection that will be handled elsewhere
+            }
+            _ => {}
+        }
+
         if multi_in_process {
             multi_queue.push(arguments);
             send(&mut stream, resp_parser::encode_simple_string("QUEUED"));
             continue;
         }
 
-        let response: RedisType = match arguments[0].to_ascii_lowercase().as_str() {
-            "multi" => {
-                multi_in_process = true;
-                RedisType::SimpleString("OK".to_owned())
-            }
-            "incr" => commands::incr(&arguments, &server, false),
-            "xread" => commands::xread(&arguments, &server),
-            "xrange" => commands::xrange(&arguments, &server),
-            "xadd" => commands::xadd(&arguments, &server),
-            "type" => commands::value_type(&arguments, &server), // can't be 'type' because rust
-            "keys" => commands::keys(&server),
-            "config" => commands::config(&arguments, &server),
-            "wait" => commands::wait(&arguments, &server),
-            "psync" => {
-                psync(stream, &server);
-                return; // This connection is now a replication connection that will be handled elsewhere
-            }
-            "replconf" => commands::replconf(&arguments, &server),
-            "info" => commands::info(&server),
-            "set" => commands::set(&arguments, &server, false),
-            "get" => commands::get(&arguments, &server),
-
-            "echo" => RedisType::BulkString(Some(arguments[1].to_owned())),
-            "ping" => RedisType::SimpleString("PONG".to_owned()),
-            _ => RedisType::SimpleError("Error, unsupported command".to_owned()),
-        };
-        send(&mut stream, resp_parser::encode(&response));
+        send(
+            &mut stream,
+            resp_parser::encode(&handle_command(&arguments, &server)),
+        );
     }
+}
+
+fn handle_command(arguments: &Vec<String>, server: &Arc<Server>) -> RedisType {
+    return match arguments[0].to_ascii_lowercase().as_str() {
+        "incr" => commands::incr(arguments, server, false),
+        "xread" => commands::xread(arguments, server),
+        "xrange" => commands::xrange(arguments, server),
+        "xadd" => commands::xadd(arguments, server),
+        "type" => commands::value_type(arguments, server), // can't be 'type' because rust
+        "keys" => commands::keys(server),
+        "config" => commands::config(arguments, server),
+        "wait" => commands::wait(arguments, server),
+        "replconf" => commands::replconf(arguments, server),
+        "info" => commands::info(server),
+        "set" => commands::set(arguments, server, false),
+        "get" => commands::get(arguments, server),
+        "echo" => RedisType::BulkString(Some(arguments[1].to_owned())),
+        "ping" => RedisType::SimpleString("PONG".to_owned()),
+        _ => RedisType::SimpleError("Error, unsupported command".to_owned()),
+    };
 }
